@@ -1,208 +1,80 @@
 # Confluence RAG
 
-Небольшой self-hosted RAG для Confluence. Поднимается локально через Docker Compose: backend на Go, frontend на Vue, PostgreSQL с pgvector и любой OpenAI-compatible провайдер для embeddings/LLM. По умолчанию в compose есть Ollama, если хочется всё гонять без внешних API.
+Self-hosted RAG for Confluence. It indexes Confluence pages into PostgreSQL with pgvector, then provides search and chat over the indexed content through a Go backend and a Vue frontend.
 
-Идея простая: забираем страницы из Confluence, чистим HTML, режем текст на чанки, считаем embeddings, кладём всё в Postgres и потом ищем по этому индексу из поиска или чата.
+The default Docker Compose file is meant for regular users and pulls ready-to-run images from Docker Hub.
 
-## Что внутри
+## Services
 
 - `backend-api` - HTTP API.
-- `backend-worker` - воркер, который забирает sync jobs и индексирует страницы.
-- `postgres` - страницы, чанки, вектора, история чата и статусы задач.
-- `frontend` - UI на Vue/Vite.
-- `ollama` - опционально, локальный OpenAI-compatible endpoint.
+- `backend-worker` - background sync and indexing worker.
+- `frontend` - web UI.
+- `postgres` - PostgreSQL with pgvector.
+- `ollama` - optional local OpenAI-compatible provider.
+- `adminer` - optional database UI.
 
-В backend код разнесён по слоям:
-
-- `internal/domain` - интерфейсы и доменные контракты.
-- `internal/db` - PostgreSQL adapter.
-- `internal/search`, `internal/rag`, `internal/jobs` - основная логика.
-- `internal/http` - transport layer.
-
-## Быстрый старт для пользователей
+## Quick Start
 
 ```bash
 cp .env.example .env
 docker compose up -d
 ```
 
-Обычный `docker-compose.yml` тянет готовые образы из Docker Hub:
+Open:
+
+- UI: http://localhost:5173
+- API healthcheck: http://localhost:8080/api/health
+
+The default images are:
 
 ```text
 anmaslov/simple-rag-backend:${IMAGE_TAG:-latest}
 anmaslov/simple-rag-frontend:${IMAGE_TAG:-latest}
 ```
 
-Чтобы запустить конкретную версию:
+To run a specific release:
 
 ```bash
 IMAGE_TAG=v0.1.0 docker compose up -d
 ```
 
-После запуска:
+## Configuration
 
-- frontend: http://localhost:5173
-- backend healthcheck: http://localhost:8080/api/health
-
-Если меняли `.env`, пересоздайте контейнеры:
-
-```bash
-docker compose up -d --force-recreate
-```
-
-Если меняли только переменные для Postgres из `.env`, старый volume уже создан со старыми значениями. Для локального окружения проще пересоздать его:
-
-```bash
-docker compose down -v
-docker compose up -d
-```
-
-Команда удалит локальную базу, так что для нужных данных сначала сделайте backup.
-
-## Запуск для разработчиков
-
-Для разработки используйте `docker-compose.dev.yml`: он собирает `backend` и `frontend` из локальных исходников.
-
-```bash
-cp .env.example .env
-docker compose -f docker-compose.dev.yml up -d --build
-```
-
-После изменений в коде можно пересобрать только сервисы приложения:
-
-```bash
-docker compose -f docker-compose.dev.yml up -d --build --force-recreate backend-api backend-worker frontend
-```
-
-Для запуска dev-окружения с Ollama добавьте профиль: `docker compose -f docker-compose.dev.yml --profile ollama up -d --build`.
-
-## Настройка Confluence
-
-Основные поля в `.env`:
+Edit `.env` before the first run:
 
 ```env
-CONFLUENCE_BASE_URL=https://confluence.company.ru
+CONFLUENCE_BASE_URL=https://confluence.company.com
 CONFLUENCE_TOKEN=...
 CONFLUENCE_AUTH_TYPE=bearer
 CONFLUENCE_ROOT_PAGE_IDS=123456,789012
-CONFLUENCE_SPACE_KEYS=
 ```
 
-Обычно достаточно указать `CONFLUENCE_ROOT_PAGE_IDS`. Worker возьмёт эти страницы, проиндексирует их и рекурсивно пройдёт по дочерним. `CONFLUENCE_SPACE_KEYS` оставлен как запасной ручной сценарий для sync по space.
-
-Для basic auth:
+For basic auth:
 
 ```env
 CONFLUENCE_AUTH_TYPE=basic
-CONFLUENCE_USERNAME=user@company.ru
+CONFLUENCE_USERNAME=user@company.com
 CONFLUENCE_TOKEN=api-token-or-password
 ```
 
-Если Confluence живёт за корпоративным self-signed сертификатом, временно можно поставить:
+The project expects OpenAI-compatible embeddings and chat completion endpoints. `.env.example` is configured for Ollama by default.
 
-```env
-CONFLUENCE_SKIP_TLS_VERIFY=true
-```
-
-Нормальный вариант для постоянного окружения - добавить корпоративный CA в контейнер.
-
-## Локальные модели через Ollama
-
-Если хотите запускать embeddings и LLM локально:
+## Local Ollama
 
 ```bash
 docker compose --profile ollama up -d
-docker exec -it confluence-rag-ollama-1 ollama pull bge-m3
-docker exec -it confluence-rag-ollama-1 ollama pull qwen2.5:14b
+docker exec -it kedo-rag-ollama-1 ollama pull bge-m3
+docker exec -it kedo-rag-ollama-1 ollama pull qwen2.5:14b
 ```
 
-В `.env.example` уже стоят значения под Ollama:
+## Usage
 
-```env
-EMBEDDINGS_BASE_URL=http://ollama:11434/v1
-EMBEDDINGS_MODEL=bge-m3
-EMBEDDINGS_DIM=1024
+1. Open http://localhost:5173/sync and start indexing.
+2. Use http://localhost:5173/search for semantic search.
+3. Use http://localhost:5173/chat for RAG answers with sources.
 
-LLM_BASE_URL=http://ollama:11434/v1
-LLM_MODEL=qwen2.5:14b
-```
+## Developer Docs
 
-Если подключаете другой OpenAI-compatible endpoint, проверьте base URL, API key, модель embeddings и размерность `EMBEDDINGS_DIM`.
+Development setup, tests, release publishing, and Docker image details are documented in [DEVELOPMENT.md](./DEVELOPMENT.md).
 
-## Индексация
-
-Откройте http://localhost:5173/sync.
-
-Там есть несколько режимов:
-
-- `Sync configured roots` - основной вариант, индексирует `CONFLUENCE_ROOT_PAGE_IDS` и дочерние страницы.
-- `Sync space` - ручной sync одного space, скорее fallback.
-- `Run CQL` - произвольный CQL.
-- `Incremental` - MVP-инкремент по страницам, изменённым за последние 7 дней. Если заданы root page ids, запрос ограничивается этим scope.
-
-Если одна страница упала с ошибкой, job не валится целиком: ошибка попадёт в лог, а страница будет помечена как skipped.
-
-## Поиск и чат
-
-После sync можно идти в:
-
-- http://localhost:5173/search
-- http://localhost:5173/chat
-
-`/search` показывает найденные страницы и чанки. `/chat` делает hybrid search, собирает контекст и отдаёт его в LLM вместе с источниками.
-
-Если подходящего контекста нет, backend отвечает:
-
-```text
-В проиндексированных материалах Confluence я не нашёл ответа
-```
-
-## API
-
-- `GET /api/health`
-- `GET /api/spaces`
-- `POST /api/sync`
-- `GET /api/sync/status`
-- `GET /api/pages`
-- `GET /api/pages/{id}`
-- `POST /api/search`
-- `POST /api/chat`
-- `GET /api/settings`
-- `PUT /api/settings`
-
-`PUT /api/settings` в MVP возвращает read-only ошибку.
-
-## Частые проблемы
-
-`vector dimension mismatch`
-
-Миграция создаёт `page_chunks.embedding vector(1024)`. Если модель embeddings возвращает другую размерность, поменяйте `EMBEDDINGS_DIM`, поправьте миграцию и пересоздайте dev volume.
-
-`LLM/embeddings status 404`
-
-Проверьте, что endpoint правда поддерживает OpenAI-compatible ручки `/v1/embeddings` и `/v1/chat/completions`.
-
-`Confluence status 401`
-
-Проверьте `CONFLUENCE_TOKEN`, `CONFLUENCE_AUTH_TYPE` и `CONFLUENCE_USERNAME`, если используете basic auth.
-
-`certificate signed by unknown authority`
-
-Для быстрой локальной проверки можно включить:
-
-```env
-CONFLUENCE_SKIP_TLS_VERIFY=true
-EMBEDDINGS_SKIP_TLS_VERIFY=true
-LLM_SKIP_TLS_VERIFY=true
-```
-
-Для нормального окружения лучше добавить нужный CA в образ.
-
-Миграции не применились на старой базе
-
-`docker compose up` не переигрывает уже применённые миграции и не пересоздаёт volume. В dev можно снести volume:
-
-```bash
-docker compose down -v
-docker compose up -d --build
-```
+Russian documentation is available in [README_RU.md](./README_RU.md).
