@@ -1,0 +1,21 @@
+{
+  "name": "confluence-rag-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "^6.0.1",
+    "pinia": "^3.0.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.2",
+    "vue": "^3.5.24",
+    "vue-router": "^4.6.3",
+    "vue-tsc": "^3.1.5"
+  },
+  "devDependencies": {}
+}

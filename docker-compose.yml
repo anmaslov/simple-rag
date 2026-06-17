@@ -1,0 +1,87 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-rag}
+      POSTGRES_USER: ${POSTGRES_USER:-rag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rag}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rag} -d ${POSTGRES_DB:-rag}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrations:
+    image: postgres:17
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-rag}
+    volumes:
+      - ./backend/migrations:/migrations:ro
+    command: >
+      sh -c 'for f in /migrations/*.sql; do echo "applying $$f"; psql -h postgres -U ${POSTGRES_USER:-rag} -d ${POSTGRES_DB:-rag} -v ON_ERROR_STOP=1 -f "$$f"; done'
+    restart: "no"
+
+  backend-api:
+    build: ./backend
+    command: ["/api"]
+    env_file: .env
+    environment:
+      HTTP_ADDR: ":8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:-rag}:${POSTGRES_PASSWORD:-rag}@postgres:5432/${POSTGRES_DB:-rag}?sslmode=disable
+      EMBEDDINGS_BASE_URL: ${EMBEDDINGS_BASE_URL:-http://ollama:11434/v1}
+      EMBEDDINGS_SKIP_TLS_VERIFY: ${EMBEDDINGS_SKIP_TLS_VERIFY:-false}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434/v1}
+      LLM_SKIP_TLS_VERIFY: ${LLM_SKIP_TLS_VERIFY:-false}
+    ports:
+      - "8080:8080"
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+
+  backend-worker:
+    build: ./backend
+    command: ["/worker"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-rag}:${POSTGRES_PASSWORD:-rag}@postgres:5432/${POSTGRES_DB:-rag}?sslmode=disable
+      EMBEDDINGS_BASE_URL: ${EMBEDDINGS_BASE_URL:-http://ollama:11434/v1}
+      EMBEDDINGS_SKIP_TLS_VERIFY: ${EMBEDDINGS_SKIP_TLS_VERIFY:-false}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434/v1}
+      LLM_SKIP_TLS_VERIFY: ${LLM_SKIP_TLS_VERIFY:-false}
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend-api
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  adminer:
+    image: adminer:latest
+    profiles: ["tools"]
+    ports:
+      - "8081:8080"
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
+  ollama_data:

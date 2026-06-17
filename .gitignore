@@ -1,0 +1,69 @@
+# Env and secrets
+.env
+.env.*
+!.env.example
+.envrc
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.kubeconfig
+secrets/
+credentials/
+
+# Go
+bin/
+backend/bin/
+backend/.gocache/
+backend/.gomodcache/
+backend/coverage.out
+backend/*.test
+backend/tmp/
+coverage.out
+*.coverprofile
+*.test
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.npm/
+frontend/coverage/
+frontend/.nyc_output/
+frontend/playwright-report/
+frontend/test-results/
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Docker and local data
+postgres_data/
+ollama_data/
+docker-compose.override.yml
+docker-compose.*.override.yml
+
+# IDE and OS files
+.idea/
+.vscode/
+.codex/
+.agents/
+.DS_Store
+Thumbs.db
+
+# Logs, temp files, and local databases
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+tmp/
+temp/
+*.tmp
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.sql.gz
