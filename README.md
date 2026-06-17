@@ -19,11 +19,24 @@
 - `internal/search`, `internal/rag`, `internal/jobs` - основная логика.
 - `internal/http` - transport layer.
 
-## Быстрый старт
+## Быстрый старт для пользователей
 
 ```bash
 cp .env.example .env
 docker compose up -d
+```
+
+Обычный `docker-compose.yml` тянет готовые образы из Docker Hub:
+
+```text
+anmaslov/simple-rag-backend:${IMAGE_TAG:-latest}
+anmaslov/simple-rag-frontend:${IMAGE_TAG:-latest}
+```
+
+Чтобы запустить конкретную версию:
+
+```bash
+IMAGE_TAG=v0.1.0 docker compose up -d
 ```
 
 После запуска:
@@ -31,20 +44,37 @@ docker compose up -d
 - frontend: http://localhost:5173
 - backend healthcheck: http://localhost:8080/api/health
 
-Если меняли `.env`, пересоздайте контейнеры. Чтобы точно пересобрать образы и поднять сервисы уже с новыми значениями:
+Если меняли `.env`, пересоздайте контейнеры:
 
 ```bash
-docker compose up -d --build --force-recreate backend-api backend-worker frontend
+docker compose up -d --force-recreate
 ```
 
-Если меняли только переменные для Postgres из `.env`, старый volume уже создан со старыми значениями. Для dev-окружения проще пересоздать его:
+Если меняли только переменные для Postgres из `.env`, старый volume уже создан со старыми значениями. Для локального окружения проще пересоздать его:
 
 ```bash
 docker compose down -v
-docker compose up -d --build
+docker compose up -d
 ```
 
 Команда удалит локальную базу, так что для нужных данных сначала сделайте backup.
+
+## Запуск для разработчиков
+
+Для разработки используйте `docker-compose.dev.yml`: он собирает `backend` и `frontend` из локальных исходников.
+
+```bash
+cp .env.example .env
+docker compose -f docker-compose.dev.yml up -d --build
+```
+
+После изменений в коде можно пересобрать только сервисы приложения:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d --build --force-recreate backend-api backend-worker frontend
+```
+
+Для запуска dev-окружения с Ollama добавьте профиль: `docker compose -f docker-compose.dev.yml --profile ollama up -d --build`.
 
 ## Настройка Confluence
 
