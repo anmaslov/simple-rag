@@ -1,14 +1,7 @@
 # Confluence RAG
 
 [![CI](https://img.shields.io/github/actions/workflow/status/anmaslov/simple-rag/ci.yml?branch=master&style=flat-square&logo=github&label=CI)](https://github.com/anmaslov/simple-rag/actions/workflows/ci.yml)
-[![Go Report](https://goreportcard.com/badge/github.com/anmaslov/simple-rag?style=flat-square)](https://goreportcard.com/report/github.com/anmaslov/simple-rag)
-[![Backend image](https://img.shields.io/docker/v/anmaslov/simple-rag-backend?sort=semver&style=flat-square&logo=docker&label=backend)](https://hub.docker.com/r/anmaslov/simple-rag-backend)
-[![Frontend image](https://img.shields.io/docker/v/anmaslov/simple-rag-frontend?sort=semver&style=flat-square&logo=docker&label=frontend)](https://hub.docker.com/r/anmaslov/simple-rag-frontend)
 [![Docker pulls](https://img.shields.io/docker/pulls/anmaslov/simple-rag-backend?style=flat-square&logo=docker&label=pulls)](https://hub.docker.com/r/anmaslov/simple-rag-backend)
-[![Go](https://img.shields.io/badge/Go-1.23-00ADD8?style=flat-square&logo=go)](https://go.dev/)
-[![Vue](https://img.shields.io/badge/Vue-3-42b883?style=flat-square&logo=vuedotjs)](https://vuejs.org/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-4169E1?style=flat-square&logo=postgresql)](https://github.com/pgvector/pgvector)
-[![OpenAI compatible](https://img.shields.io/badge/OpenAI--compatible-LLM-412991?style=flat-square)](https://platform.openai.com/docs/api-reference)
 [![Multi arch](https://img.shields.io/badge/linux-amd64%20%7C%20arm64-555?style=flat-square&logo=linux)](./DEVELOPMENT.md)
 
 Self-hosted RAG for Confluence. It indexes Confluence pages into PostgreSQL with pgvector, then provides search and chat over the indexed content through a Go backend and a Vue frontend.
