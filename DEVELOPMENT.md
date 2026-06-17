@@ -92,47 +92,16 @@ On push and pull request to `master`, CI runs:
 - `go test ./...`
 - `npm run build`
 
-On tags matching `v*`, CI also builds and pushes multi-platform Docker Hub images for:
+On release tags, CI also builds multi-platform Docker images for:
 
 - `linux/amd64`
 - `linux/arm64`
-
-Published tags:
-
-```text
-anmaslov/simple-rag-backend:<tag>
-anmaslov/simple-rag-backend:latest
-anmaslov/simple-rag-frontend:<tag>
-anmaslov/simple-rag-frontend:latest
-```
-
-Docker Hub overviews are updated from `README.md` after image publication.
-
-Required GitHub repository secrets:
-
-```text
-DOCKERHUB_USERNAME
-DOCKERHUB_TOKEN
-```
-
-`DOCKERHUB_TOKEN` should be a Docker Hub access token.
-
-## Release
-
-Create and push a version tag:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-After the tag workflow finishes, both Docker Hub repositories should contain multi-architecture images. This is required for Apple Silicon and other `linux/arm64` hosts.
 
 ## Common Issues
 
 `no matching manifest for linux/arm64/v8`
 
-The Docker Hub tag was built without an arm64 image. Publish a new `v*` tag after the multi-platform workflow change, then pull again:
+The selected Docker image tag was built without an arm64 image. Use a newer multi-platform image tag, then pull again:
 
 ```bash
 docker compose pull
