@@ -12,8 +12,8 @@ import (
 	"confluence-rag/backend/internal/search"
 )
 
-const systemPrompt = `Ты отвечаешь только на основе предоставленного контекста из корпоративного Confluence.
-Если в контексте нет ответа, скажи: "В проиндексированных материалах Confluence я не нашёл ответа".
+const systemPrompt = `Ты отвечаешь только на основе предоставленного контекста из выбранных корпоративных проиндексированных источников.
+Если в контексте нет ответа, скажи: "Информация не найдена в выбранных проиндексированных источниках".
 Не используй внешние знания.
 Не выдумывай.
 Если источники противоречат друг другу, явно укажи это.
@@ -50,12 +50,12 @@ type ChatStreamEvent struct {
 	Sources   []models.SearchResult `json:"sources,omitempty"`
 }
 
-func (s *Service) Chat(ctx context.Context, sessionID, message string, spaces []string, topK int) (ChatResult, error) {
+func (s *Service) Chat(ctx context.Context, sessionID, message string, scope models.SearchScope, topK int) (ChatResult, error) {
 	history, err := s.loadHistory(ctx, sessionID)
 	if err != nil {
 		return ChatResult{}, err
 	}
-	results, err := s.search.Search(ctx, buildSearchQuery(history, message), spaces, s.resolveTopK(topK))
+	results, err := s.search.Search(ctx, buildSearchQuery(history, message), scope, s.resolveTopK(topK))
 	if err != nil {
 		return ChatResult{}, err
 	}
@@ -72,7 +72,7 @@ func (s *Service) Chat(ctx context.Context, sessionID, message string, spaces []
 		return ChatResult{}, err
 	}
 	if strings.TrimSpace(contextText) == "" {
-		resp.Content = "В проиндексированных материалах Confluence я не нашёл ответа"
+		resp.Content = "Информация не найдена в выбранных проиндексированных источниках"
 	}
 	srcJSON, err := json.Marshal(results)
 	if err != nil {
@@ -84,7 +84,7 @@ func (s *Service) Chat(ctx context.Context, sessionID, message string, spaces []
 	return ChatResult{SessionID: sessionID, Answer: resp.Content, Sources: results}, nil
 }
 
-func (s *Service) ChatStream(ctx context.Context, sessionID, message string, spaces []string, topK int, emit func(ChatStreamEvent) error) error {
+func (s *Service) ChatStream(ctx context.Context, sessionID, message string, scope models.SearchScope, topK int, emit func(ChatStreamEvent) error) error {
 	if err := emit(ChatStreamEvent{Type: "status", Message: "Ищу релевантные источники"}); err != nil {
 		return err
 	}
@@ -92,7 +92,7 @@ func (s *Service) ChatStream(ctx context.Context, sessionID, message string, spa
 	if err != nil {
 		return err
 	}
-	results, err := s.search.Search(ctx, buildSearchQuery(history, message), spaces, s.resolveTopK(topK))
+	results, err := s.search.Search(ctx, buildSearchQuery(history, message), scope, s.resolveTopK(topK))
 	if err != nil {
 		return err
 	}
@@ -112,7 +112,7 @@ func (s *Service) ChatStream(ctx context.Context, sessionID, message string, spa
 
 	contextText := buildContext(results)
 	if strings.TrimSpace(contextText) == "" {
-		answer := "В проиндексированных материалах Confluence я не нашёл ответа"
+		answer := "Информация не найдена в выбранных проиндексированных источниках"
 		if err := emit(ChatStreamEvent{Type: "delta", Delta: answer}); err != nil {
 			return err
 		}
@@ -170,11 +170,11 @@ func (s *Service) resolveTopK(topK int) int {
 func buildPromptMessages(contextText string, history []models.ChatMessage, message string) []llm.Message {
 	historyText := buildHistory(history)
 	var user strings.Builder
-	user.WriteString("Контекст Confluence:\n\n")
+	user.WriteString("Контекст из выбранных корпоративных источников:\n\n")
 	user.WriteString(contextText)
 	user.WriteString("\n")
 	if historyText != "" {
-		user.WriteString("История текущего диалога нужна только для понимания уточнений и местоимений. Факты бери из контекста Confluence выше.\n\n")
+		user.WriteString("История текущего диалога нужна только для понимания уточнений и местоимений. Факты бери только из контекста источников выше.\n\n")
 		user.WriteString(historyText)
 		user.WriteString("\n\n")
 	}
@@ -240,12 +240,20 @@ func buildHistory(history []models.ChatMessage) string {
 func buildContext(results []models.SearchResult) string {
 	var b strings.Builder
 	for i, r := range results {
-		fmt.Fprintf(&b, "[Источник %d]\nTitle: ", i+1)
+		fmt.Fprintf(&b, "[Источник %d]\nSource type: %s\nLocation: %s\nTitle: ", i+1, r.SourceType, r.SourceLabel)
 		b.WriteString(r.Title)
 		b.WriteString("\nURL: ")
 		b.WriteString(r.URL)
 		b.WriteString("\nSpace: ")
 		b.WriteString(r.SpaceKey)
+		if r.Repository != "" {
+			b.WriteString("\nRepository: ")
+			b.WriteString(r.Repository)
+			b.WriteString("\nRef: ")
+			b.WriteString(r.Ref)
+			b.WriteString("\nPath: ")
+			b.WriteString(r.FilePath)
+		}
 		b.WriteString("\nContent:\n")
 		b.WriteString(r.Chunk)
 		b.WriteString("\n\n")

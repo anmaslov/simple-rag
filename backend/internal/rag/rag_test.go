@@ -41,3 +41,15 @@ func TestBuildPromptMessagesIncludesHistoryAndCurrentQuestion(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildContextIncludesUniversalSourceLocation(t *testing.T) {
+	got := buildContext([]models.SearchResult{
+		{SourceType: "confluence", SourceLabel: "Wiki / HR", Title: "Vacation", SpaceKey: "HR", URL: "https://wiki/page", Chunk: "Policy"},
+		{SourceType: "gitlab", SourceLabel: "GitLab / team/app", Title: "main.go", Repository: "team/app", Ref: "main", FilePath: "cmd/main.go", URL: "https://git/app", Chunk: "func main()"},
+	})
+	for _, want := range []string{"Source type: confluence", "Location: Wiki / HR", "Space: HR", "Source type: gitlab", "Repository: team/app", "Ref: main", "Path: cmd/main.go"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected context to contain %q, got %q", want, got)
+		}
+	}
+}

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { api, type SearchResult } from '../api/client'
+import { api, type SearchResult, type SearchScope } from '../api/client'
+import ScopePicker from '../components/ScopePicker.vue'
 
 const message = ref('')
 const loading = ref(false)
@@ -11,6 +12,7 @@ const messages = ref<ChatMessage[]>([])
 const sessions = ref<ChatSession[]>([])
 const loadingHistory = ref(false)
 const activeStream = ref<AbortController | null>(null)
+const scope = ref<SearchScope>({ source_types: [], connection_ids: [], scope_ids: [] })
 
 type StreamEvent = {
   type: 'status' | 'sources' | 'session' | 'delta' | 'done' | 'error'
@@ -34,7 +36,8 @@ async function send() {
   try {
     await streamChat({
       session_id: sessionId.value || undefined,
-      message: text
+      message: text,
+      scope: scope.value
     }, controller.signal, (event) => {
       const assistant = messages.value[assistantIndex]
       if (!assistant) return
@@ -181,7 +184,7 @@ function stripSourceSection(value: string) {
 function uniqueSources(sources: SearchResult[] = []) {
   const seen = new Set<string>()
   return sources.filter((source) => {
-    const key = source.url || `${source.title}:${source.space_key}`
+    const key = source.url || `${source.title}:${source.scope_id}`
     if (seen.has(key)) return false
     seen.add(key)
     return true
@@ -354,15 +357,21 @@ function escapeAttr(value: string) {
                 <span class="source-index">{{ idx + 1 }}</span>
                 <span class="source-text">
                   <strong>{{ s.title }}</strong>
-                  <small>{{ s.space_key }}<template v-if="sourceHost(s.url)"> · {{ sourceHost(s.url) }}</template></small>
+                  <small>
+                    <span :class="['source-badge', s.source_type]">{{ s.source_type }}</span>
+                    <template v-if="s.source_type === 'confluence'">{{ s.space_key }}</template>
+                    <template v-else>{{ s.repository }} · {{ s.ref }} · {{ s.file_path }}</template>
+                    <template v-if="sourceHost(s.url)"> · {{ sourceHost(s.url) }}</template>
+                  </small>
                 </span>
               </a>
             </div>
           </section>
         </article>
       </div>
+      <ScopePicker v-model="scope" />
       <form class="composer" @submit.prevent="send">
-        <input v-model="message" placeholder="Спросите по проиндексированному Confluence" />
+        <input v-model="message" placeholder="Спросите по выбранным проиндексированным источникам" />
         <div class="composer-actions">
           <button v-if="loading" type="button" class="stop-button" @click="stopGeneration">Стоп</button>
           <button :disabled="loading">{{ loading ? 'Отвечаю...' : 'Отправить' }}</button>

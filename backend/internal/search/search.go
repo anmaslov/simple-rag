@@ -20,7 +20,7 @@ func New(repo domain.SearchRepository, embedder embeddings.Embedder, vectorWeigh
 	return &Service{repo: repo, embedder: embedder, vectorWeight: vectorWeight, keywordWeight: keywordWeight}
 }
 
-func (s *Service) Search(ctx context.Context, query string, spaceKeys []string, topK int) ([]models.SearchResult, error) {
+func (s *Service) Search(ctx context.Context, query string, scope models.SearchScope, topK int) ([]models.SearchResult, error) {
 	if topK <= 0 {
 		topK = 10
 	}
@@ -32,11 +32,11 @@ func (s *Service) Search(ctx context.Context, query string, spaceKeys []string, 
 	if len(vecs) > 0 {
 		vector = vecs[0]
 	}
-	vectorResults, err := s.repo.VectorSearch(ctx, vector, spaceKeys, topK*2)
+	vectorResults, err := s.repo.VectorSearch(ctx, vector, scope, topK*2)
 	if err != nil {
 		return nil, err
 	}
-	keywordResults, err := s.repo.KeywordSearch(ctx, query, spaceKeys, topK*2)
+	keywordResults, err := s.repo.KeywordSearch(ctx, query, scope, topK*2)
 	if err != nil {
 		return nil, err
 	}

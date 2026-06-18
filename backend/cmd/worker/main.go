@@ -8,7 +8,6 @@ import (
 	"syscall"
 
 	"confluence-rag/backend/internal/config"
-	"confluence-rag/backend/internal/confluence"
 	"confluence-rag/backend/internal/db"
 	"confluence-rag/backend/internal/embeddings"
 	"confluence-rag/backend/internal/jobs"
@@ -26,9 +25,8 @@ func main() {
 	}
 	defer pool.Close()
 	repo := db.NewRepository(pool)
-	cf := confluence.New(cfg.Confluence, log)
 	embedder := embeddings.NewOpenAI(cfg.Embeddings.BaseURL, cfg.Embeddings.APIKey, cfg.Embeddings.Model, cfg.Embeddings.SkipTLSVerify, log)
-	worker := jobs.NewWorker(cfg, repo, cf, embedder, log)
+	worker := jobs.NewWorker(cfg, repo, embedder, log)
 	if err := worker.Run(ctx); err != nil && err != context.Canceled {
 		log.Error("worker stopped", "error", err)
 		os.Exit(1)

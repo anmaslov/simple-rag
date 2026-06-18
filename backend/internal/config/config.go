@@ -16,6 +16,7 @@ type Config struct {
 	Chunk       ChunkConfig
 	Search      SearchConfig
 	Worker      WorkerConfig
+	GitLab      GitLabConfig
 }
 
 type ConfluenceConfig struct {
@@ -60,6 +61,14 @@ type WorkerConfig struct {
 	PollInterval time.Duration
 }
 
+type GitLabConfig struct {
+	MaxFileBytes      int64
+	MaxPages          int
+	ExcludedDirs      []string
+	ExcludedFiles     []string
+	AllowedExtensions []string
+}
+
 func Load() Config {
 	return Config{
 		HTTPAddr:    env("HTTP_ADDR", ":8080"),
@@ -91,6 +100,13 @@ func Load() Config {
 		Chunk:  ChunkConfig{Size: envInt("CHUNK_SIZE", 900), Overlap: envInt("CHUNK_OVERLAP", 180)},
 		Search: SearchConfig{TopK: envInt("SEARCH_TOP_K", 8), VectorWeight: envFloat("SEARCH_VECTOR_WEIGHT", 0.6), KeywordWeight: envFloat("SEARCH_KEYWORD_WEIGHT", 0.4)},
 		Worker: WorkerConfig{PollInterval: time.Duration(envInt("WORKER_POLL_SECONDS", 5)) * time.Second},
+		GitLab: GitLabConfig{
+			MaxFileBytes:      int64(envInt("GITLAB_MAX_FILE_BYTES", 1048576)),
+			MaxPages:          envInt("GITLAB_MAX_API_PAGES", 1000),
+			ExcludedDirs:      csv(env("GITLAB_EXCLUDED_DIRS", ".git,vendor,node_modules,dist,build,target,.next,.nuxt,coverage")),
+			ExcludedFiles:     csv(env("GITLAB_EXCLUDED_FILES", ".env,.env.*,id_rsa,id_ed25519,credentials.json,secrets.yml,*.pem,*.key,*.p12,*.jks")),
+			AllowedExtensions: csv(env("GITLAB_TEXT_EXTENSIONS", ".go,.py,.js,.jsx,.ts,.tsx,.vue,.java,.kt,.kts,.rb,.php,.cs,.c,.h,.cpp,.hpp,.rs,.swift,.scala,.sh,.bash,.zsh,.sql,.md,.txt,.rst,.adoc,.yaml,.yml,.json,.toml,.xml,.html,.css,.scss,.less,.proto,.graphql,.tf,.hcl,.gradle,.properties,.ini,.conf,.dockerfile")),
+		},
 	}
 }
 

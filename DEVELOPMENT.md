@@ -30,7 +30,7 @@ docker compose -f docker-compose.dev.yml down -v
 docker compose -f docker-compose.dev.yml up -d --build
 ```
 
-This removes the local PostgreSQL volume.
+This removes the local PostgreSQL volume. It is not required when upgrading: migration `003_multi_source.sql` preserves and copies existing Confluence data.
 
 ## Tests
 
@@ -58,6 +58,7 @@ Backend packages:
 - `internal/search` - hybrid search logic.
 - `internal/rag` - RAG orchestration.
 - `internal/jobs` - sync worker.
+- `internal/confluence` and `internal/gitlab` - source-specific REST clients.
 - `internal/http` - HTTP transport.
 
 Frontend:
@@ -118,12 +119,24 @@ Check that the configured provider supports OpenAI-compatible `/v1/embeddings` a
 
 `certificate signed by unknown authority`
 
-For quick local testing, set:
+For LLM/embeddings local testing, set:
 
 ```env
-CONFLUENCE_SKIP_TLS_VERIFY=true
 EMBEDDINGS_SKIP_TLS_VERIFY=true
 LLM_SKIP_TLS_VERIFY=true
 ```
 
-For a long-lived environment, add the required CA certificate to the container image instead.
+Confluence and GitLab TLS settings are managed per connection on the Sources page. Keep verification enabled when possible; use the warning-protected opt-in only for a self-signed endpoint. For a long-lived environment, add the required CA certificate to the container image instead.
+
+## Source API
+
+- `GET|POST /api/connections`, `PUT|DELETE /api/connections/{id}`
+- `POST /api/connections/{id}/test`
+- `GET /api/connections/{id}/confluence/spaces`
+- `GET /api/connections/{id}/gitlab/projects|branches|tags`
+- `GET|POST /api/scopes`, `DELETE /api/scopes/{id}`
+- `POST /api/scopes/{id}/sync`
+- `GET /api/documents`
+- `POST /api/search`, `/api/chat`, `/api/chat/stream` with the universal `scope` object
+
+Saved secrets are deliberately omitted from responses and logs.

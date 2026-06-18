@@ -34,7 +34,7 @@ func main() {
 	searchSvc := search.New(repo, embedder, cfg.Search.VectorWeight, cfg.Search.KeywordWeight)
 	llmClient := llm.NewOpenAI(cfg.LLM.BaseURL, cfg.LLM.APIKey, cfg.LLM.Model, cfg.LLM.Temperature, cfg.LLM.SkipTLSVerify)
 	ragSvc := rag.New(repo, searchSvc, llmClient, cfg.Search.TopK)
-	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: httpapi.NewRouter(cfg, repo, searchSvc, ragSvc), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: httpapi.NewRouter(cfg, repo, searchSvc, ragSvc, log), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		log.Info("api listening", "addr", cfg.HTTPAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

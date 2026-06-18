@@ -50,6 +50,7 @@ type PageBatch struct {
 }
 
 type Client interface {
+	Test(ctx context.Context) error
 	ListSpaces(ctx context.Context) ([]Space, error)
 	ListPagesBySpace(ctx context.Context, spaceKey string, cursor Cursor) (PageBatch, error)
 	ListChildPages(ctx context.Context, pageID string, cursor Cursor) (PageBatch, error)
@@ -66,6 +67,11 @@ type RESTClient struct {
 func New(cfg config.ConfluenceConfig, log *slog.Logger) *RESTClient {
 	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.SkipTLSVerify}} //nolint:gosec // Explicit corporate self-signed opt-in.
 	return &RESTClient{cfg: cfg, http: &http.Client{Timeout: 60 * time.Second, Transport: tr}, log: log}
+}
+
+func (c *RESTClient) Test(ctx context.Context) error {
+	_, err := c.ListSpaces(ctx)
+	return err
 }
 
 func (c *RESTClient) ListSpaces(ctx context.Context) ([]Space, error) {
@@ -168,7 +174,7 @@ func (c *RESTClient) getJSON(ctx context.Context, u string, dst any) error {
 		resp, err := c.http.Do(req)
 		if err == nil && resp.StatusCode < 300 {
 			defer resp.Body.Close()
-			return json.NewDecoder(resp.Body).Decode(dst)
+			return json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(dst)
 		}
 		if resp != nil {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -188,6 +194,35 @@ func (c *RESTClient) getJSON(ctx context.Context, u string, dst any) error {
 		}
 	}
 	return last
+}
+
+func ParsePageID(input string) (string, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", fmt.Errorf("page id is required")
+	}
+	if !strings.Contains(input, "://") {
+		if _, err := strconv.ParseInt(input, 10, 64); err != nil {
+			return "", fmt.Errorf("invalid Confluence page id")
+		}
+		return input, nil
+	}
+	u, err := url.Parse(input)
+	if err != nil {
+		return "", fmt.Errorf("invalid Confluence page URL")
+	}
+	if id := u.Query().Get("pageId"); id != "" {
+		return id, nil
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i, part := range parts {
+		if part == "pages" && i+1 < len(parts) {
+			if _, err := strconv.ParseInt(parts[i+1], 10, 64); err == nil {
+				return parts[i+1], nil
+			}
+		}
+	}
+	return "", fmt.Errorf("page id was not found in Confluence URL")
 }
 
 func (c *RESTClient) authorize(req *http.Request) {
