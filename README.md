@@ -30,7 +30,7 @@ Only configured text extensions are indexed. Binary files, dependency/build dire
 
 ## Existing Confluence installations
 
-Migration `003_multi_source.sql` copies existing `confluence_pages` and `page_chunks` into the universal document model without deleting the old tables or requiring a PostgreSQL volume reset. Existing Confluence env variables and `/api/sync`, `/api/pages`, search, and chat payloads with `space_keys` remain available as a compatibility layer. New sources should be managed through **Sources**.
+Migration `003_multi_source.sql` copies existing `confluence_pages` and `page_chunks` into the universal document model without deleting the old tables or requiring a PostgreSQL volume reset. After migration, all Confluence connections and credentials are managed through **Sources**; Confluence connection environment variables are no longer used.
 
 ## Search scope
 

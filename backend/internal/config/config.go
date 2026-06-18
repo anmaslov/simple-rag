@@ -10,24 +10,17 @@ import (
 type Config struct {
 	HTTPAddr    string
 	DatabaseURL string
-	Confluence  ConfluenceConfig
 	Embeddings  OpenAIConfig
 	LLM         LLMConfig
 	Chunk       ChunkConfig
 	Search      SearchConfig
 	Worker      WorkerConfig
+	Sources     SourcesConfig
 	GitLab      GitLabConfig
 }
 
-type ConfluenceConfig struct {
-	BaseURL       string
-	Token         string
-	AuthType      string
-	Username      string
-	RootPageIDs   []string
-	SpaceKeys     []string
-	SkipTLSVerify bool
-	PageLimit     int
+type SourcesConfig struct {
+	PageLimit int
 }
 
 type OpenAIConfig struct {
@@ -73,16 +66,6 @@ func Load() Config {
 	return Config{
 		HTTPAddr:    env("HTTP_ADDR", ":8080"),
 		DatabaseURL: env("DATABASE_URL", "postgres://rag:rag@localhost:5432/rag?sslmode=disable"),
-		Confluence: ConfluenceConfig{
-			BaseURL:       strings.TrimRight(env("CONFLUENCE_BASE_URL", ""), "/"),
-			Token:         env("CONFLUENCE_TOKEN", ""),
-			AuthType:      env("CONFLUENCE_AUTH_TYPE", "bearer"),
-			Username:      env("CONFLUENCE_USERNAME", ""),
-			RootPageIDs:   csv(env("CONFLUENCE_ROOT_PAGE_IDS", "")),
-			SpaceKeys:     csv(env("CONFLUENCE_SPACE_KEYS", "")),
-			SkipTLSVerify: envBool("CONFLUENCE_SKIP_TLS_VERIFY", false),
-			PageLimit:     envInt("CONFLUENCE_PAGE_LIMIT", 50),
-		},
 		Embeddings: OpenAIConfig{
 			BaseURL:       strings.TrimRight(env("EMBEDDINGS_BASE_URL", "http://localhost:11434/v1"), "/"),
 			APIKey:        env("EMBEDDINGS_API_KEY", "ollama"),
@@ -97,9 +80,10 @@ func Load() Config {
 			Temperature:   envFloat("LLM_TEMPERATURE", 0.1),
 			SkipTLSVerify: envBool("LLM_SKIP_TLS_VERIFY", false),
 		},
-		Chunk:  ChunkConfig{Size: envInt("CHUNK_SIZE", 900), Overlap: envInt("CHUNK_OVERLAP", 180)},
-		Search: SearchConfig{TopK: envInt("SEARCH_TOP_K", 8), VectorWeight: envFloat("SEARCH_VECTOR_WEIGHT", 0.6), KeywordWeight: envFloat("SEARCH_KEYWORD_WEIGHT", 0.4)},
-		Worker: WorkerConfig{PollInterval: time.Duration(envInt("WORKER_POLL_SECONDS", 5)) * time.Second},
+		Chunk:   ChunkConfig{Size: envInt("CHUNK_SIZE", 900), Overlap: envInt("CHUNK_OVERLAP", 180)},
+		Search:  SearchConfig{TopK: envInt("SEARCH_TOP_K", 8), VectorWeight: envFloat("SEARCH_VECTOR_WEIGHT", 0.6), KeywordWeight: envFloat("SEARCH_KEYWORD_WEIGHT", 0.4)},
+		Worker:  WorkerConfig{PollInterval: time.Duration(envInt("WORKER_POLL_SECONDS", 5)) * time.Second},
+		Sources: SourcesConfig{PageLimit: envInt("SOURCE_PAGE_LIMIT", 50)},
 		GitLab: GitLabConfig{
 			MaxFileBytes:      int64(envInt("GITLAB_MAX_FILE_BYTES", 1048576)),
 			MaxPages:          envInt("GITLAB_MAX_API_PAGES", 1000),

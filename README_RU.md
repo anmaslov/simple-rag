@@ -30,7 +30,7 @@ GitLab token должен иметь права чтения API и репози
 
 ## Миграция со старой конфигурации
 
-Миграция `003_multi_source.sql` безопасно переносит существующие `confluence_pages/page_chunks` в `documents/document_chunks`, не удаляет старые таблицы и не требует пересоздания PostgreSQL volume. Env-настройки Confluence и старые `/api/sync`, `/api/pages`, `space_keys` продолжают работать как compatibility layer. Новые источники следует добавлять через UI.
+Миграция `003_multi_source.sql` безопасно переносит существующие `confluence_pages/page_chunks` в `documents/document_chunks`, не удаляет старые таблицы и не требует пересоздания PostgreSQL volume. После миграции подключения и credentials Confluence управляются только через страницу **Sources**; переменные подключения Confluence в env больше не используются.
 
 ## Поиск
 

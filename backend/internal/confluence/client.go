@@ -12,8 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"confluence-rag/backend/internal/config"
 )
 
 type Cursor struct {
@@ -58,13 +56,22 @@ type Client interface {
 	GetPage(ctx context.Context, pageID string) (Page, error)
 }
 
+type Config struct {
+	BaseURL       string
+	Token         string
+	AuthType      string
+	Username      string
+	SkipTLSVerify bool
+	PageLimit     int
+}
+
 type RESTClient struct {
-	cfg  config.ConfluenceConfig
+	cfg  Config
 	http *http.Client
 	log  *slog.Logger
 }
 
-func New(cfg config.ConfluenceConfig, log *slog.Logger) *RESTClient {
+func New(cfg Config, log *slog.Logger) *RESTClient {
 	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.SkipTLSVerify}} //nolint:gosec // Explicit corporate self-signed opt-in.
 	return &RESTClient{cfg: cfg, http: &http.Client{Timeout: 60 * time.Second, Transport: tr}, log: log}
 }

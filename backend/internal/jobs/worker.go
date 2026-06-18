@@ -65,7 +65,7 @@ func (w *Worker) tick(ctx context.Context) error {
 
 func (w *Worker) runJob(ctx context.Context, job models.SyncJob) error {
 	if job.ScopeID == nil {
-		return w.runLegacyConfluenceJob(ctx, job)
+		return errors.New("sync job has no source scope")
 	}
 	scope, err := w.repo.GetScope(ctx, *job.ScopeID)
 	if err != nil {
@@ -85,82 +85,11 @@ func (w *Worker) runJob(ctx context.Context, job models.SyncJob) error {
 	}
 }
 
-func (w *Worker) runLegacyConfluenceJob(ctx context.Context, job models.SyncJob) error {
-	if w.cfg.Confluence.BaseURL == "" {
-		return errors.New("legacy Confluence env connection is not configured")
-	}
-	client := confluence.New(w.cfg.Confluence, w.log)
-	switch job.Mode {
-	case "space":
-		return w.syncLegacySpace(ctx, job.ID, client, job.SpaceKey, job.ForceReindex)
-	case "cql":
-		return w.syncLegacyCQL(ctx, job.ID, client, job.CQL, job.ForceReindex)
-	case "incremental":
-		cql := "type=page and lastmodified > now('-7d')"
-		if len(w.cfg.Confluence.SpaceKeys) > 0 {
-			cql += " and space in (" + joinQuoted(w.cfg.Confluence.SpaceKeys) + ")"
-		}
-		return w.syncLegacyCQL(ctx, job.ID, client, cql, false)
-	default:
-		if len(w.cfg.Confluence.RootPageIDs) == 0 {
-			return errors.New("CONFLUENCE_ROOT_PAGE_IDS is required for legacy full sync")
-		}
-		for _, id := range w.cfg.Confluence.RootPageIDs {
-			page, err := client.GetPage(ctx, id)
-			if err != nil {
-				w.skip(job.ID, id, err)
-				continue
-			}
-			scope, err := w.ensureLegacyPageScope(ctx, page, true)
-			if err != nil {
-				return err
-			}
-			if err := w.syncPageTree(ctx, job.ID, client, scope, page, true, map[string]struct{}{}); err != nil {
-				w.skip(job.ID, id, err)
-			}
-		}
-		return nil
-	}
-}
-
-func (w *Worker) ensureLegacyPageScope(ctx context.Context, page confluence.Page, children bool) (models.SourceScope, error) {
-	connectionID, err := w.ensureEnvConnection(ctx)
-	if err != nil {
-		return models.SourceScope{}, err
-	}
-	cfg, _ := json.Marshal(map[string]any{"page_id": page.ID, "include_children": children, "space_key": page.SpaceKey, "from_env": true})
-	return w.repo.CreateScope(ctx, domain.ScopeInput{ConnectionID: connectionID, SourceType: models.SourceConfluence, ScopeType: "page", ExternalID: page.ID, Name: page.Title, Config: cfg})
-}
-
-func (w *Worker) ensureEnvConnection(ctx context.Context) (int64, error) {
-	conns, err := w.repo.ListConnections(ctx, models.SourceConfluence)
-	if err != nil {
-		return 0, err
-	}
-	var connectionID int64
-	for _, c := range conns {
-		if c.Name == "Environment Confluence" {
-			connectionID = c.ID
-			break
-		}
-	}
-	if connectionID == 0 {
-		conn, err := w.repo.CreateConnection(ctx, domain.ConnectionInput{
-			SourceType: models.SourceConfluence, Name: "Environment Confluence", BaseURL: w.cfg.Confluence.BaseURL,
-			AuthType: w.cfg.Confluence.AuthType, Username: w.cfg.Confluence.Username, Secret: w.cfg.Confluence.Token,
-			SkipTLSVerify: w.cfg.Confluence.SkipTLSVerify,
-		})
-		if err != nil {
-			return 0, err
-		}
-		connectionID = conn.ID
-	}
-	return connectionID, nil
-}
-
 func (w *Worker) syncConfluence(ctx context.Context, job models.SyncJob, conn models.ConnectionSecret, scope models.SourceScope) error {
-	cfg := w.cfg.Confluence
-	cfg.BaseURL, cfg.Token, cfg.AuthType, cfg.Username, cfg.SkipTLSVerify = conn.BaseURL, conn.Secret, conn.AuthType, conn.Username, conn.SkipTLSVerify
+	cfg := confluence.Config{
+		BaseURL: conn.BaseURL, Token: conn.Secret, AuthType: conn.AuthType, Username: conn.Username,
+		SkipTLSVerify: conn.SkipTLSVerify, PageLimit: w.cfg.Sources.PageLimit,
+	}
 	client := confluence.New(cfg, w.log)
 	var sc struct {
 		PageID          string `json:"page_id"`
@@ -194,7 +123,7 @@ func (w *Worker) syncConfluence(ctx context.Context, job models.SyncJob, conn mo
 }
 
 func (w *Worker) syncSpace(ctx context.Context, jobID int64, client confluence.Client, scope models.SourceScope, space string, force bool) error {
-	cur := confluence.Cursor{Limit: w.cfg.Confluence.PageLimit}
+	cur := confluence.Cursor{Limit: w.cfg.Sources.PageLimit}
 	for pageNo := 0; pageNo < 10000; pageNo++ {
 		batch, err := client.ListPagesBySpace(ctx, space, cur)
 		if err != nil {
@@ -221,7 +150,7 @@ func (w *Worker) syncPageTree(ctx context.Context, jobID int64, client confluenc
 	if err := w.countAndIndexPage(ctx, jobID, scope, page, force); err != nil {
 		w.skip(jobID, page.ID, err)
 	}
-	cur := confluence.Cursor{Limit: w.cfg.Confluence.PageLimit}
+	cur := confluence.Cursor{Limit: w.cfg.Sources.PageLimit}
 	for pageNo := 0; pageNo < 10000; pageNo++ {
 		batch, err := client.ListChildPages(ctx, page.ID, cur)
 		if err != nil {
@@ -359,48 +288,6 @@ func ShouldReindex(unchanged, indexed, hasChunks, force bool) bool {
 	return force || !unchanged || !indexed || !hasChunks
 }
 
-func (w *Worker) syncLegacySpace(ctx context.Context, jobID int64, client confluence.Client, space string, force bool) error {
-	scope, err := w.ensureLegacySpaceScope(ctx, space)
-	if err != nil {
-		return err
-	}
-	return w.syncSpace(ctx, jobID, client, scope, space, force)
-}
-
-func (w *Worker) syncLegacyCQL(ctx context.Context, jobID int64, client confluence.Client, cql string, force bool) error {
-	cur := confluence.Cursor{Limit: w.cfg.Confluence.PageLimit}
-	for pageNo := 0; pageNo < 10000; pageNo++ {
-		batch, err := client.SearchPagesByCQL(ctx, cql, cur)
-		if err != nil {
-			return err
-		}
-		for _, p := range batch.Pages {
-			scope, err := w.ensureLegacySpaceScope(ctx, p.SpaceKey)
-			if err != nil {
-				w.skip(jobID, p.ID, err)
-				continue
-			}
-			if err := w.countAndIndexPage(ctx, jobID, scope, p, force); err != nil {
-				w.skip(jobID, p.ID, err)
-			}
-		}
-		if !batch.HasNext {
-			return nil
-		}
-		cur = batch.Next
-	}
-	return errors.New("Confluence CQL pagination limit exceeded")
-}
-
-func (w *Worker) ensureLegacySpaceScope(ctx context.Context, space string) (models.SourceScope, error) {
-	connectionID, err := w.ensureEnvConnection(ctx)
-	if err != nil {
-		return models.SourceScope{}, err
-	}
-	cfg, _ := json.Marshal(map[string]any{"space_key": space, "from_env": true})
-	return w.repo.CreateScope(ctx, domain.ScopeInput{ConnectionID: connectionID, SourceType: models.SourceConfluence, ScopeType: "space", ExternalID: space, Name: space, Config: cfg})
-}
-
 func (w *Worker) skip(jobID int64, document string, err error) {
 	w.log.Error("document indexing failed", "job_id", jobID, "document", document, "error", err)
 	_ = w.repo.IncJob(context.Background(), jobID, 0, 0, 1)
@@ -419,12 +306,4 @@ func safeJobError(err error) string {
 		return ""
 	}
 	return strings.ReplaceAll(err.Error(), "\n", " ")
-}
-
-func joinQuoted(items []string) string {
-	out := make([]string, 0, len(items))
-	for _, v := range items {
-		out = append(out, "'"+strings.ReplaceAll(v, "'", "''")+"'")
-	}
-	return strings.Join(out, ",")
 }

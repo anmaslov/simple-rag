@@ -62,10 +62,10 @@ func NewRouter(cfg config.Config, repo domain.Repository, searchSvc *search.Serv
 		r.Post("/{id}/sync", s.syncScope)
 	})
 	r.Get("/api/documents", s.documents)
+	r.Get("/api/jobs", s.syncStatus)
 
 	// Compatibility endpoints.
 	r.Get("/api/spaces", s.spaces)
-	r.Post("/api/sync", s.createLegacySync)
 	r.Get("/api/sync/status", s.syncStatus)
 	r.Get("/api/pages", s.pages)
 	r.Get("/api/pages/{id}", s.page)
@@ -213,8 +213,7 @@ func (s *Server) testConnection(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch conn.SourceType {
 	case models.SourceConfluence:
-		cfg := s.cfg.Confluence
-		cfg.BaseURL, cfg.Token, cfg.AuthType, cfg.Username, cfg.SkipTLSVerify = conn.BaseURL, conn.Secret, conn.AuthType, conn.Username, conn.SkipTLSVerify
+		cfg := s.confluenceConfig(conn)
 		err = confluence.New(cfg, s.log).Test(r.Context())
 	case models.SourceGitLab:
 		err = gitlab.New(gitlab.Config{BaseURL: conn.BaseURL, Token: conn.Secret, SkipTLSVerify: conn.SkipTLSVerify, MaxPages: s.cfg.GitLab.MaxPages}, s.log).Test(r.Context())
@@ -236,8 +235,7 @@ func (s *Server) remoteConfluenceSpaces(w http.ResponseWriter, r *http.Request) 
 		badRequest(w, errors.New("connection is not Confluence"))
 		return
 	}
-	cfg := s.cfg.Confluence
-	cfg.BaseURL, cfg.Token, cfg.AuthType, cfg.Username, cfg.SkipTLSVerify = conn.BaseURL, conn.Secret, conn.AuthType, conn.Username, conn.SkipTLSVerify
+	cfg := s.confluenceConfig(conn)
 	items, err := confluence.New(cfg, s.log).ListSpaces(r.Context())
 	if err != nil {
 		s.log.Warn("list Confluence spaces failed", "connection_id", conn.ID, "error", err)
@@ -245,6 +243,13 @@ func (s *Server) remoteConfluenceSpaces(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"spaces": items})
+}
+
+func (s *Server) confluenceConfig(conn models.ConnectionSecret) confluence.Config {
+	return confluence.Config{
+		BaseURL: conn.BaseURL, Token: conn.Secret, AuthType: conn.AuthType, Username: conn.Username,
+		SkipTLSVerify: conn.SkipTLSVerify, PageLimit: s.cfg.Sources.PageLimit,
+	}
 }
 
 func (s *Server) gitlabProjects(w http.ResponseWriter, r *http.Request) {
@@ -369,8 +374,7 @@ func (s *Server) createScope(w http.ResponseWriter, r *http.Request) {
 				badRequest(w, err)
 				return
 			}
-			cfg := s.cfg.Confluence
-			cfg.BaseURL, cfg.Token, cfg.AuthType, cfg.Username, cfg.SkipTLSVerify = conn.BaseURL, conn.Secret, conn.AuthType, conn.Username, conn.SkipTLSVerify
+			cfg := s.confluenceConfig(conn)
 			page, err := confluence.New(cfg, s.log).GetPage(r.Context(), pageID)
 			if err != nil {
 				s.remoteError(w, r, "failed to load Confluence page", err)
@@ -499,48 +503,6 @@ func (s *Server) spaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"spaces": items})
-}
-
-func (s *Server) createLegacySync(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Mode     string `json:"mode"`
-		SpaceKey string `json:"space_key"`
-		CQL      string `json:"cql"`
-	}
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	if req.Mode == "" {
-		req.Mode = "full"
-	}
-	if err := validateSyncRequest(req.Mode, req.SpaceKey, req.CQL); err != nil {
-		badRequest(w, err)
-		return
-	}
-	job, err := s.repo.CreateSyncJob(r.Context(), req.Mode, req.SpaceKey, req.CQL)
-	if err != nil {
-		s.internalError(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusAccepted, job)
-}
-
-func validateSyncRequest(mode, spaceKey, cql string) error {
-	switch mode {
-	case "full", "incremental":
-		return nil
-	case "space":
-		if strings.TrimSpace(spaceKey) == "" {
-			return errors.New("space_key is required for space sync")
-		}
-	case "cql":
-		if strings.TrimSpace(cql) == "" {
-			return errors.New("cql is required for cql sync")
-		}
-	default:
-		return errors.New("mode must be one of full, space, cql, incremental")
-	}
-	return nil
 }
 
 func (s *Server) syncStatus(w http.ResponseWriter, r *http.Request) {
@@ -797,13 +759,23 @@ func (s *Server) chatStream(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) settings(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"confluence_base_url": s.cfg.Confluence.BaseURL, "confluence_auth_type": s.cfg.Confluence.AuthType,
-		"confluence_root_page_ids": s.cfg.Confluence.RootPageIDs, "confluence_space_keys": s.cfg.Confluence.SpaceKeys,
-		"llm_base_url": s.cfg.LLM.BaseURL, "llm_model": s.cfg.LLM.Model,
-		"embeddings_base_url": s.cfg.Embeddings.BaseURL, "embeddings_model": s.cfg.Embeddings.Model,
-		"embeddings_dim": s.cfg.Embeddings.Dim, "chunk_size": s.cfg.Chunk.Size, "chunk_overlap": s.cfg.Chunk.Overlap,
-		"top_k": s.cfg.Search.TopK, "gitlab_max_file_bytes": s.cfg.GitLab.MaxFileBytes,
-		"secrets": "configured via environment or write-only connection API; never returned",
+		"ai": map[string]any{
+			"llm_base_url": s.cfg.LLM.BaseURL, "llm_model": s.cfg.LLM.Model,
+			"embeddings_base_url": s.cfg.Embeddings.BaseURL, "embeddings_model": s.cfg.Embeddings.Model,
+			"embeddings_dim": s.cfg.Embeddings.Dim,
+		},
+		"indexing": map[string]any{
+			"chunk_size": s.cfg.Chunk.Size, "chunk_overlap": s.cfg.Chunk.Overlap,
+			"source_page_limit": s.cfg.Sources.PageLimit, "gitlab_max_file_bytes": s.cfg.GitLab.MaxFileBytes,
+		},
+		"search": map[string]any{
+			"top_k": s.cfg.Search.TopK, "vector_weight": s.cfg.Search.VectorWeight,
+			"keyword_weight": s.cfg.Search.KeywordWeight,
+		},
+		"security": map[string]any{
+			"source_credentials": "stored in database and never returned by API",
+			"tls_verification":   "enabled by default; configured per connection",
+		},
 	})
 }
 

@@ -136,6 +136,7 @@ Confluence and GitLab TLS settings are managed per connection on the Sources pag
 - `GET /api/connections/{id}/gitlab/projects|branches|tags`
 - `GET|POST /api/scopes`, `DELETE /api/scopes/{id}`
 - `POST /api/scopes/{id}/sync`
+- `GET /api/jobs`
 - `GET /api/documents`
 - `POST /api/search`, `/api/chat`, `/api/chat/stream` with the universal `scope` object
 

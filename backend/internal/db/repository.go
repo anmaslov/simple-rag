@@ -313,17 +313,6 @@ func (r *Repository) CreateSourceSyncJob(ctx context.Context, sourceType string,
 	return scanJob(r.pool.QueryRow(ctx, q, args...))
 }
 
-func (r *Repository) CreateSyncJob(ctx context.Context, mode, spaceKey, cql string) (models.SyncJob, error) {
-	q, args, err := psql.Insert("sync_jobs").
-		Columns("status", "mode", "source_type", "space_key", "cql", "force_reindex").
-		Values("pending", mode, models.SourceConfluence, spaceKey, cql, mode == "full").
-		Suffix("RETURNING " + jobColumns).ToSql()
-	if err != nil {
-		return models.SyncJob{}, err
-	}
-	return scanJob(r.pool.QueryRow(ctx, q, args...))
-}
-
 func (r *Repository) ClaimNextJob(ctx context.Context) (models.SyncJob, bool, error) {
 	q := `UPDATE sync_jobs SET status='running',started_at=now(),updated_at=now()
 		WHERE id=(SELECT j.id FROM sync_jobs j
