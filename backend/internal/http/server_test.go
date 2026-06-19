@@ -1,10 +1,67 @@
 package httpapi
 
 import (
+	"net/http"
+	"reflect"
+	"sort"
 	"testing"
 
+	"confluence-rag/backend/internal/config"
 	"confluence-rag/backend/internal/models"
+	"github.com/go-chi/chi/v5"
 )
+
+func TestNewRouterRegistersPublicAPI(t *testing.T) {
+	router, ok := NewRouter(config.Config{}, nil, nil, nil).(chi.Routes)
+	if !ok {
+		t.Fatal("router does not expose chi routes")
+	}
+
+	var got []string
+	if err := chi.Walk(router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		got = append(got, method+" "+route)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(got)
+
+	want := []string{
+		"DELETE /api/chat/sessions/{id}",
+		"DELETE /api/connections/{id}/",
+		"DELETE /api/scopes/{id}",
+		"GET /api/chat/sessions",
+		"GET /api/chat/sessions/{id}/messages",
+		"GET /api/connections/",
+		"GET /api/connections/{id}/confluence/spaces",
+		"GET /api/connections/{id}/gitlab/branches",
+		"GET /api/connections/{id}/gitlab/projects",
+		"GET /api/connections/{id}/gitlab/tags",
+		"GET /api/documents",
+		"GET /api/health",
+		"GET /api/jobs",
+		"GET /api/pages",
+		"GET /api/pages/{id}",
+		"GET /api/scopes/",
+		"GET /api/settings",
+		"GET /api/spaces",
+		"GET /api/sync/status",
+		"POST /api/chat",
+		"POST /api/chat/stream",
+		"POST /api/connections/",
+		"POST /api/connections/{id}/test",
+		"POST /api/scopes/",
+		"POST /api/scopes/{id}/sync",
+		"POST /api/search",
+		"PUT /api/connections/{id}/",
+		"PUT /api/settings",
+	}
+	sort.Strings(want)
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected API routes:\ngot:  %v\nwant: %v", got, want)
+	}
+}
 
 func TestValidateConnectionMasksSecretFromModel(t *testing.T) {
 	in, err := validateConnection(connectionRequest{

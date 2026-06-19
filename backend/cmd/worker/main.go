@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -15,20 +16,35 @@ import (
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	cfg := config.Load()
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-	pool, err := db.Connect(ctx, cfg.DatabaseURL)
+	cfg, err := config.LoadValidated()
 	if err != nil {
-		log.Error("db connect failed", "error", err)
+		log.Error("invalid configuration", "error", err)
 		os.Exit(1)
 	}
-	defer pool.Close()
-	repo := db.NewRepository(pool)
-	embedder := embeddings.NewOpenAI(cfg.Embeddings.BaseURL, cfg.Embeddings.APIKey, cfg.Embeddings.Model, cfg.Embeddings.SkipTLSVerify, log)
-	worker := jobs.NewWorker(cfg, repo, embedder, log)
-	if err := worker.Run(ctx); err != nil && err != context.Canceled {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	if err := run(ctx, cfg, log); err != nil && err != context.Canceled {
 		log.Error("worker stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func run(ctx context.Context, cfg config.Config, log *slog.Logger) error {
+	pool, err := db.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("connect database: %w", err)
+	}
+	defer pool.Close()
+	repo := db.NewRepository(pool)
+	embedder := embeddings.NewOpenAIWithOptions(
+		cfg.Embeddings.BaseURL,
+		cfg.Embeddings.APIKey,
+		cfg.Embeddings.Model,
+		cfg.Embeddings.SkipTLSVerify,
+		log,
+		embeddings.WithExpectedDimension(cfg.Embeddings.Dim),
+	)
+	worker := jobs.NewWorker(cfg, repo, embedder, log)
+	return worker.Run(ctx)
 }
