@@ -396,6 +396,19 @@ func TestBuildPromptMessagesIncludesHistoryAndCurrentQuestion(t *testing.T) {
 	}
 }
 
+func TestSystemPromptTreatsSourceCodeAsEvidence(t *testing.T) {
+	for _, want := range []string{
+		"Исходный код считай полноценным источником фактов",
+		"восстанавливай последовательность действий",
+		"Не расшифровывай аббревиатуры",
+		"дай полезный частичный ответ",
+	} {
+		if !strings.Contains(systemPrompt, want) {
+			t.Fatalf("expected system prompt to contain %q", want)
+		}
+	}
+}
+
 func TestBuildContextIncludesUniversalSourceLocation(t *testing.T) {
 	got := buildContext([]models.SearchResult{
 		{SourceType: "confluence", SourceLabel: "Wiki / HR", Title: "Vacation", SpaceKey: "HR", URL: "https://wiki/page", Chunk: "Policy"},

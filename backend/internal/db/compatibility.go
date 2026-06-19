@@ -9,13 +9,28 @@ import (
 )
 
 func (r *Repository) UpsertSpace(ctx context.Context, key, name string) error {
-	_, err := r.pool.Exec(ctx, `INSERT INTO confluence_spaces(space_key,name) VALUES($1,$2)
-		ON CONFLICT(space_key) DO UPDATE SET name=excluded.name,updated_at=now()`, key, name)
+	q, args, err := psql.Insert("confluence_spaces").
+		Columns("space_key", "name").
+		Values(key, name).
+		Suffix("ON CONFLICT(space_key) DO UPDATE SET name=excluded.name,updated_at=now()").
+		ToSql()
+	if err != nil {
+		return err
+	}
+	_, err = r.pool.Exec(ctx, q, args...)
 	return err
 }
 
 func (r *Repository) ListSpaces(ctx context.Context) ([]models.Space, error) {
-	rows, err := r.pool.Query(ctx, `SELECT id,external_id,name FROM source_scopes WHERE source_type='confluence' AND scope_type='space' ORDER BY external_id`)
+	q, args, err := psql.Select("id", "external_id", "name").
+		From("source_scopes").
+		Where(sq.Eq{"source_type": models.SourceConfluence, "scope_type": "space"}).
+		OrderBy("external_id").
+		ToSql()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +77,14 @@ func (r *Repository) ListPages(ctx context.Context, space, qText string) ([]mode
 }
 
 func (r *Repository) GetPage(ctx context.Context, id int64) (models.Page, error) {
-	return scanCompatPage(r.pool.QueryRow(ctx, `SELECT id,external_id,coalesce(metadata->>'space_key',''),title,url,
+	q, args, err := psql.Select(`id,external_id,coalesce(metadata->>'space_key',''),title,url,
 		coalesce((metadata->>'version')::int,0),coalesce(metadata->>'status','current'),content_hash,content,
-		source_updated_at,indexed_at,created_at,updated_at FROM documents WHERE id=$1 AND source_type='confluence'`, id))
+		source_updated_at,indexed_at,created_at,updated_at`).
+		From("documents").
+		Where(sq.Eq{"id": id, "source_type": models.SourceConfluence}).
+		ToSql()
+	if err != nil {
+		return models.Page{}, err
+	}
+	return scanCompatPage(r.pool.QueryRow(ctx, q, args...))
 }

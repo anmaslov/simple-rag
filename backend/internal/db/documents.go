@@ -15,8 +15,15 @@ import (
 const documentColumns = "id,source_type,connection_id,scope_id,external_id,title,url,content,content_hash,source_updated_at,indexed_at,metadata,created_at,updated_at"
 
 func (r *Repository) UpsertDocument(ctx context.Context, in domain.DocumentInput) (models.Document, bool, error) {
+	hashQuery, hashArgs, err := psql.Select("content_hash").
+		From("documents").
+		Where(sq.Eq{"scope_id": in.ScopeID, "external_id": in.ExternalID}).
+		ToSql()
+	if err != nil {
+		return models.Document{}, false, err
+	}
 	var oldHash string
-	err := r.pool.QueryRow(ctx, "SELECT content_hash FROM documents WHERE scope_id=$1 AND external_id=$2", in.ScopeID, in.ExternalID).Scan(&oldHash)
+	err = r.pool.QueryRow(ctx, hashQuery, hashArgs...).Scan(&oldHash)
 	unchanged := err == nil && oldHash == in.ContentHash
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return models.Document{}, false, err
@@ -40,14 +47,23 @@ func (r *Repository) UpsertDocument(ctx context.Context, in domain.DocumentInput
 }
 
 func (r *Repository) DocumentHasChunks(ctx context.Context, id int64) (bool, error) {
+	exists := sq.Select("1").From("document_chunks").Where(sq.Eq{"document_id": id})
+	q, args, err := psql.Select().Column("EXISTS (?)", exists).ToSql()
+	if err != nil {
+		return false, err
+	}
 	var ok bool
-	err := r.pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM document_chunks WHERE document_id=$1)", id).Scan(&ok)
+	err = r.pool.QueryRow(ctx, q, args...).Scan(&ok)
 	return ok, err
 }
 
 func (r *Repository) ReplaceDocumentChunks(ctx context.Context, documentID int64, chunks []domain.ChunkInput) error {
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "DELETE FROM document_chunks WHERE document_id=$1", documentID); err != nil {
+		q, args, err := psql.Delete("document_chunks").Where(sq.Eq{"document_id": documentID}).ToSql()
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, q, args...); err != nil {
 			return err
 		}
 		for _, ch := range chunks {
@@ -55,25 +71,41 @@ func (r *Repository) ReplaceDocumentChunks(ctx context.Context, documentID int64
 			if err != nil {
 				return err
 			}
-			_, err = tx.Exec(ctx, `INSERT INTO document_chunks(document_id,chunk_index,content,content_hash,token_count,metadata,embedding)
-				VALUES($1,$2,$3,$4,$5,$6,$7::vector)`, documentID, ch.Index, ch.Content, ch.Hash, ch.TokenCount, meta, vectorLiteral(ch.Embedding))
+			q, args, err = psql.Insert("document_chunks").
+				Columns("document_id", "chunk_index", "content", "content_hash", "token_count", "metadata", "embedding").
+				Values(documentID, ch.Index, ch.Content, ch.Hash, ch.TokenCount, meta, sq.Expr("?::vector", vectorLiteral(ch.Embedding))).
+				ToSql()
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec(ctx, q, args...)
 			if err != nil {
 				return err
 			}
 		}
-		_, err := tx.Exec(ctx, "UPDATE documents SET indexed_at=now(),updated_at=now() WHERE id=$1", documentID)
+		q, args, err = psql.Update("documents").
+			Set("indexed_at", sq.Expr("now()")).
+			Set("updated_at", sq.Expr("now()")).
+			Where(sq.Eq{"id": documentID}).
+			ToSql()
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, q, args...)
 		return err
 	})
 }
 
 func (r *Repository) DeleteDocumentsNotSeen(ctx context.Context, scopeID int64, ids []string) (int64, error) {
-	var tag pgconnTag
-	var err error
-	if len(ids) == 0 {
-		tag, err = r.pool.Exec(ctx, "DELETE FROM documents WHERE scope_id=$1", scopeID)
-	} else {
-		tag, err = r.pool.Exec(ctx, "DELETE FROM documents WHERE scope_id=$1 AND NOT (external_id=ANY($2))", scopeID, ids)
+	b := psql.Delete("documents").Where(sq.Eq{"scope_id": scopeID})
+	if len(ids) > 0 {
+		b = b.Where("NOT (external_id=ANY(?))", ids)
 	}
+	q, args, err := b.ToSql()
+	if err != nil {
+		return 0, err
+	}
+	tag, err := r.pool.Exec(ctx, q, args...)
 	if err != nil {
 		return 0, err
 	}

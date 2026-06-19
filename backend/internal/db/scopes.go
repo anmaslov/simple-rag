@@ -66,7 +66,11 @@ func (r *Repository) GetScope(ctx context.Context, id int64) (models.SourceScope
 }
 
 func (r *Repository) DeleteScope(ctx context.Context, id int64) error {
-	tag, err := r.pool.Exec(ctx, "DELETE FROM source_scopes WHERE id=$1", id)
+	q, args, err := psql.Delete("source_scopes").Where(sq.Eq{"id": id}).ToSql()
+	if err != nil {
+		return err
+	}
+	tag, err := r.pool.Exec(ctx, q, args...)
 	if err == nil && tag.RowsAffected() == 0 {
 		return pgx.ErrNoRows
 	}
@@ -74,6 +78,14 @@ func (r *Repository) DeleteScope(ctx context.Context, id int64) error {
 }
 
 func (r *Repository) MarkScopeSynced(ctx context.Context, id int64) error {
-	_, err := r.pool.Exec(ctx, "UPDATE source_scopes SET last_synced_at=now(),updated_at=now() WHERE id=$1", id)
+	q, args, err := psql.Update("source_scopes").
+		Set("last_synced_at", sq.Expr("now()")).
+		Set("updated_at", sq.Expr("now()")).
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return err
+	}
+	_, err = r.pool.Exec(ctx, q, args...)
 	return err
 }

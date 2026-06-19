@@ -1,6 +1,7 @@
 package db
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -37,5 +38,25 @@ func TestAddScopeFilterEmptyMeansAllSources(t *testing.T) {
 	}
 	if strings.Contains(sql, "WHERE") || len(args) != 0 {
 		t.Fatalf("empty scope must not add filters: %s %#v", sql, args)
+	}
+}
+
+func TestClaimNextJobQuery(t *testing.T) {
+	sql, args, err := claimNextJobQuery()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"UPDATE sync_jobs SET status = $1",
+		"NOT EXISTS (SELECT 1 FROM sync_jobs r",
+		"FOR UPDATE SKIP LOCKED",
+		"RETURNING " + jobColumns,
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("expected SQL to contain %q: %s", want, sql)
+		}
+	}
+	if want := []any{"running", "pending", "running"}; !reflect.DeepEqual(args, want) {
+		t.Fatalf("unexpected args: want %#v, got %#v", want, args)
 	}
 }

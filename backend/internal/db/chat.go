@@ -6,6 +6,7 @@ import (
 
 	"confluence-rag/backend/internal/models"
 
+	sq "github.com/Masterminds/squirrel"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -13,8 +14,16 @@ func (r *Repository) EnsureChatSession(ctx context.Context, sessionID, title str
 	if sessionID != "" {
 		return sessionID, nil
 	}
+	q, args, err := psql.Insert("chat_sessions").
+		Columns("title").
+		Values(truncate(title, 80)).
+		Suffix("RETURNING id::text").
+		ToSql()
+	if err != nil {
+		return "", err
+	}
 	var id string
-	err := r.pool.QueryRow(ctx, "INSERT INTO chat_sessions(title) VALUES($1) RETURNING id::text", truncate(title, 80)).Scan(&id)
+	err = r.pool.QueryRow(ctx, q, args...).Scan(&id)
 	return id, err
 }
 
@@ -23,16 +32,38 @@ func (r *Repository) SaveChatMessage(ctx context.Context, sessionID, role, conte
 		sources = json.RawMessage("[]")
 	}
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "INSERT INTO chat_messages(session_id,role,content,sources_json) VALUES($1,$2,$3,$4)", sessionID, role, content, sources); err != nil {
+		q, args, err := psql.Insert("chat_messages").
+			Columns("session_id", "role", "content", "sources_json").
+			Values(sessionID, role, content, sources).
+			ToSql()
+		if err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, "UPDATE chat_sessions SET updated_at=now() WHERE id=$1", sessionID)
+		if _, err := tx.Exec(ctx, q, args...); err != nil {
+			return err
+		}
+		q, args, err = psql.Update("chat_sessions").
+			Set("updated_at", sq.Expr("now()")).
+			Where(sq.Eq{"id": sessionID}).
+			ToSql()
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, q, args...)
 		return err
 	})
 }
 
 func (r *Repository) ListChatSessions(ctx context.Context) ([]models.ChatSession, error) {
-	rows, err := r.pool.Query(ctx, "SELECT id::text,title,created_at,updated_at FROM chat_sessions ORDER BY updated_at DESC LIMIT 100")
+	q, args, err := psql.Select("id::text", "title", "created_at", "updated_at").
+		From("chat_sessions").
+		OrderBy("updated_at DESC").
+		Limit(100).
+		ToSql()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +80,15 @@ func (r *Repository) ListChatSessions(ctx context.Context) ([]models.ChatSession
 }
 
 func (r *Repository) ListChatMessages(ctx context.Context, sessionID string) ([]models.ChatMessage, error) {
-	rows, err := r.pool.Query(ctx, "SELECT id,session_id::text,role,content,sources_json,created_at FROM chat_messages WHERE session_id=$1 ORDER BY created_at,id", sessionID)
+	q, args, err := psql.Select("id", "session_id::text", "role", "content", "sources_json", "created_at").
+		From("chat_messages").
+		Where(sq.Eq{"session_id": sessionID}).
+		OrderBy("created_at", "id").
+		ToSql()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -72,6 +111,10 @@ func (r *Repository) ListChatMessages(ctx context.Context, sessionID string) ([]
 }
 
 func (r *Repository) DeleteChatSession(ctx context.Context, id string) error {
-	_, err := r.pool.Exec(ctx, "DELETE FROM chat_sessions WHERE id=$1", id)
+	q, args, err := psql.Delete("chat_sessions").Where(sq.Eq{"id": id}).ToSql()
+	if err != nil {
+		return err
+	}
+	_, err = r.pool.Exec(ctx, q, args...)
 	return err
 }

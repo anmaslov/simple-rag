@@ -64,15 +64,25 @@ func (r *Repository) ListConnections(ctx context.Context, sourceType string) ([]
 }
 
 func (r *Repository) GetConnection(ctx context.Context, id int64) (models.ConnectionSecret, error) {
+	q, args, err := psql.Select(connectionColumns, "secret").
+		From("source_connections").
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return models.ConnectionSecret{}, err
+	}
 	var v models.ConnectionSecret
-	err := r.pool.QueryRow(ctx, `SELECT id,source_type,name,base_url,auth_type,username,(secret<>''),skip_tls_verify,created_at,updated_at,secret
-		FROM source_connections WHERE id=$1`, id).
+	err = r.pool.QueryRow(ctx, q, args...).
 		Scan(&v.ID, &v.SourceType, &v.Name, &v.BaseURL, &v.AuthType, &v.Username, &v.HasToken, &v.SkipTLSVerify, &v.CreatedAt, &v.UpdatedAt, &v.Secret)
 	return v, err
 }
 
 func (r *Repository) DeleteConnection(ctx context.Context, id int64) error {
-	tag, err := r.pool.Exec(ctx, "DELETE FROM source_connections WHERE id=$1", id)
+	q, args, err := psql.Delete("source_connections").Where(sq.Eq{"id": id}).ToSql()
+	if err != nil {
+		return err
+	}
+	tag, err := r.pool.Exec(ctx, q, args...)
 	if err == nil && tag.RowsAffected() == 0 {
 		return pgx.ErrNoRows
 	}
