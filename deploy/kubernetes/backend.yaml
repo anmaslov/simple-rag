@@ -1,0 +1,168 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simple-rag-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: simple-rag
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: simple-rag
+        app.kubernetes.io/component: api
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: api
+          image: anmaslov/simple-rag-backend:latest
+          command: ["/api"]
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: observability
+              containerPort: 9090
+          envFrom:
+            - secretRef:
+                name: simple-rag-env
+          env:
+            - name: HTTP_ADDR
+              value: ":8080"
+            - name: OBSERVABILITY_ADDR
+              value: ":9090"
+            - name: OTEL_SERVICE_NAME
+              value: simple-rag-api
+            - name: DEPLOYMENT_ENVIRONMENT
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          startupProbe:
+            httpGet:
+              path: /startupz
+              port: observability
+            periodSeconds: 2
+            timeoutSeconds: 1
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: observability
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: observability
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: simple-rag-api
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: /metrics
+spec:
+  selector:
+    app.kubernetes.io/name: simple-rag
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: observability
+      port: 9090
+      targetPort: observability
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simple-rag-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: simple-rag
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: simple-rag
+        app.kubernetes.io/component: worker
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: worker
+          image: anmaslov/simple-rag-backend:latest
+          command: ["/worker"]
+          ports:
+            - name: observability
+              containerPort: 9090
+          envFrom:
+            - secretRef:
+                name: simple-rag-env
+          env:
+            - name: OBSERVABILITY_ADDR
+              value: ":9090"
+            - name: OTEL_SERVICE_NAME
+              value: simple-rag-worker
+            - name: DEPLOYMENT_ENVIRONMENT
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          startupProbe:
+            httpGet:
+              path: /startupz
+              port: observability
+            periodSeconds: 2
+            timeoutSeconds: 1
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: observability
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: observability
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: simple-rag-worker
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: /metrics
+spec:
+  selector:
+    app.kubernetes.io/name: simple-rag
+    app.kubernetes.io/component: worker
+  ports:
+    - name: observability
+      port: 9090
+      targetPort: observability

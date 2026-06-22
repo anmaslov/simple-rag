@@ -11,6 +11,7 @@ func (c Config) Validate() error {
 	var errs []error
 
 	required(&errs, "HTTP_ADDR", c.HTTPAddr)
+	required(&errs, "OBSERVABILITY_ADDR", c.Observability.Addr)
 	required(&errs, "DATABASE_URL", c.DatabaseURL)
 	required(&errs, "EMBEDDINGS_BASE_URL", c.Embeddings.BaseURL)
 	required(&errs, "EMBEDDINGS_MODEL", c.Embeddings.Model)
@@ -54,6 +55,9 @@ func (c Config) Validate() error {
 	}
 	if c.Embeddings.Dim <= 0 {
 		errs = append(errs, errors.New("EMBEDDINGS_DIM must be greater than 0"))
+	}
+	if !(c.Observability.TraceSampleRate >= 0 && c.Observability.TraceSampleRate <= 1) {
+		errs = append(errs, errors.New("OTEL_TRACES_SAMPLER_ARG must be between 0 and 1"))
 	}
 
 	return errors.Join(errs...)

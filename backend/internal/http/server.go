@@ -25,10 +25,25 @@ func NewRouter(cfg config.Config, repo domain.Repository, searchSvc *search.Serv
 	if len(loggers) > 0 && loggers[0] != nil {
 		log = loggers[0]
 	}
+	return NewRouterWithMiddleware(cfg, repo, searchSvc, ragSvc, log)
+}
 
+func NewRouterWithMiddleware(
+	cfg config.Config,
+	repo domain.Repository,
+	searchSvc *search.Service,
+	ragSvc *rag.Service,
+	log *slog.Logger,
+	middlewares ...func(http.Handler) http.Handler,
+) http.Handler {
+	if log == nil {
+		log = slog.Default()
+	}
 	s := &Server{cfg: cfg, repo: repo, search: searchSvc, rag: ragSvc, log: log}
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer)
+	r.Use(middleware.RequestID, middleware.RealIP)
+	r.Use(middlewares...)
+	r.Use(middleware.Recoverer)
 	r.Use(jsonContent)
 
 	r.Get("/api/health", s.health)

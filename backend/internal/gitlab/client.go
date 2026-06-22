@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"confluence-rag/backend/internal/observability"
 )
 
 const maxResponseBytes = 4 << 20
@@ -76,7 +78,7 @@ func NewHTTPClient(skipTLSVerify bool) *http.Client {
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: skipTLSVerify}, //nolint:gosec // Per-connection explicit self-signed certificate opt-in.
 	}
-	return &http.Client{Transport: tr, Timeout: 60 * time.Second}
+	return &http.Client{Transport: observability.WrapTransport(tr), Timeout: 60 * time.Second}
 }
 
 func (c *RESTClient) Test(ctx context.Context) error {

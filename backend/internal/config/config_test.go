@@ -11,6 +11,12 @@ import (
 func TestLoadValidatedParsesExplicitEnvironment(t *testing.T) {
 	setValidEnvironment(t)
 	t.Setenv("HTTP_ADDR", "127.0.0.1:9090")
+	t.Setenv("OBSERVABILITY_ADDR", "127.0.0.1:9091")
+	t.Setenv("OTEL_SERVICE_NAME", "rag-test")
+	t.Setenv("APP_VERSION", "1.2.3")
+	t.Setenv("DEPLOYMENT_ENVIRONMENT", "test")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://jaeger:4317")
+	t.Setenv("OTEL_TRACES_SAMPLER_ARG", "0.25")
 	t.Setenv("DATABASE_URL", "postgres://example")
 	t.Setenv("EMBEDDINGS_BASE_URL", "https://embeddings.example/v1/")
 	t.Setenv("EMBEDDINGS_MODEL", "embed-model")
@@ -43,6 +49,14 @@ func TestLoadValidatedParsesExplicitEnvironment(t *testing.T) {
 	}
 	if cfg.DatabaseURL != "postgres://example" {
 		t.Errorf("DatabaseURL = %q", cfg.DatabaseURL)
+	}
+	if cfg.Observability.Addr != "127.0.0.1:9091" ||
+		cfg.Observability.ServiceName != "rag-test" ||
+		cfg.Observability.ServiceVersion != "1.2.3" ||
+		cfg.Observability.Environment != "test" ||
+		cfg.Observability.OTLPEndpoint != "http://jaeger:4317" ||
+		cfg.Observability.TraceSampleRate != 0.25 {
+		t.Errorf("Observability = %+v", cfg.Observability)
 	}
 	if cfg.Embeddings.BaseURL != "https://embeddings.example/v1" {
 		t.Errorf("Embeddings.BaseURL = %q", cfg.Embeddings.BaseURL)
@@ -95,6 +109,7 @@ func TestLoadValidatedRejectsInvalidExplicitEnvironment(t *testing.T) {
 		{name: "source page limit", key: "SOURCE_PAGE_LIMIT", value: "many"},
 		{name: "GitLab max file bytes", key: "GITLAB_MAX_FILE_BYTES", value: "huge"},
 		{name: "GitLab max pages", key: "GITLAB_MAX_API_PAGES", value: "many"},
+		{name: "trace sample rate", key: "OTEL_TRACES_SAMPLER_ARG", value: "many"},
 	}
 
 	for _, tt := range tests {
@@ -186,6 +201,10 @@ func TestConfigValidate(t *testing.T) {
 		{name: "GitLab max file bytes positive", mutate: func(c *Config) { c.GitLab.MaxFileBytes = 0 }, wantErr: "GITLAB_MAX_FILE_BYTES"},
 		{name: "GitLab max pages positive", mutate: func(c *Config) { c.GitLab.MaxPages = 0 }, wantErr: "GITLAB_MAX_API_PAGES"},
 		{name: "embeddings dimension positive", mutate: func(c *Config) { c.Embeddings.Dim = 0 }, wantErr: "EMBEDDINGS_DIM"},
+		{name: "observability address required", mutate: func(c *Config) { c.Observability.Addr = "" }, wantErr: "OBSERVABILITY_ADDR"},
+		{name: "trace sample rate non-negative", mutate: func(c *Config) { c.Observability.TraceSampleRate = -0.1 }, wantErr: "OTEL_TRACES_SAMPLER_ARG"},
+		{name: "trace sample rate at most one", mutate: func(c *Config) { c.Observability.TraceSampleRate = 1.1 }, wantErr: "OTEL_TRACES_SAMPLER_ARG"},
+		{name: "trace sample rate is a number", mutate: func(c *Config) { c.Observability.TraceSampleRate = math.NaN() }, wantErr: "OTEL_TRACES_SAMPLER_ARG"},
 		{name: "HTTP address required", mutate: func(c *Config) { c.HTTPAddr = " " }, wantErr: "HTTP_ADDR"},
 		{name: "database URL required", mutate: func(c *Config) { c.DatabaseURL = "" }, wantErr: "DATABASE_URL"},
 		{name: "embeddings base URL required", mutate: func(c *Config) { c.Embeddings.BaseURL = "" }, wantErr: "EMBEDDINGS_BASE_URL"},
@@ -222,6 +241,7 @@ func TestConfigValidateAcceptsValidConfig(t *testing.T) {
 func TestLoadValidatedRejectsExplicitEmptyRequiredValues(t *testing.T) {
 	tests := []string{
 		"HTTP_ADDR",
+		"OBSERVABILITY_ADDR",
 		"DATABASE_URL",
 		"EMBEDDINGS_BASE_URL",
 		"EMBEDDINGS_MODEL",
@@ -249,6 +269,7 @@ func setValidEnvironment(t *testing.T) {
 	t.Helper()
 	values := map[string]string{
 		"HTTP_ADDR":                  ":8080",
+		"OBSERVABILITY_ADDR":         ":9090",
 		"DATABASE_URL":               "postgres://rag:rag@localhost:5432/rag?sslmode=disable",
 		"EMBEDDINGS_BASE_URL":        "http://localhost:11434/v1",
 		"EMBEDDINGS_API_KEY":         "ollama",
@@ -272,6 +293,7 @@ func setValidEnvironment(t *testing.T) {
 		"GITLAB_EXCLUDED_DIRS":       ".git,vendor,node_modules",
 		"GITLAB_EXCLUDED_FILES":      ".env,secrets.yml",
 		"GITLAB_TEXT_EXTENSIONS":     ".go,.md",
+		"OTEL_TRACES_SAMPLER_ARG":    "0.1",
 	}
 	for key, value := range values {
 		t.Setenv(key, value)
@@ -282,6 +304,12 @@ func validConfig() Config {
 	return Config{
 		HTTPAddr:    ":8080",
 		DatabaseURL: "postgres://rag:rag@localhost:5432/rag?sslmode=disable",
+		Observability: ObservabilityConfig{
+			Addr:            ":9090",
+			ServiceVersion:  "test",
+			Environment:     "test",
+			TraceSampleRate: 0.1,
+		},
 		Embeddings: OpenAIConfig{
 			BaseURL: "https://embeddings.example/v1",
 			Model:   "embed-model",

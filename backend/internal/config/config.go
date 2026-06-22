@@ -77,10 +77,22 @@ func load(strict bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	traceSampleRate, err := loadFloat("OTEL_TRACES_SAMPLER_ARG", 0.1, strict)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		HTTPAddr:    loadString("HTTP_ADDR", ":8080", strict),
 		DatabaseURL: loadString("DATABASE_URL", "postgres://rag:rag@localhost:5432/rag?sslmode=disable", strict),
+		Observability: ObservabilityConfig{
+			Addr:            loadString("OBSERVABILITY_ADDR", ":9090", strict),
+			ServiceName:     loadString("OTEL_SERVICE_NAME", "", strict),
+			ServiceVersion:  loadString("APP_VERSION", "dev", strict),
+			Environment:     loadString("DEPLOYMENT_ENVIRONMENT", "development", strict),
+			OTLPEndpoint:    firstEnv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"),
+			TraceSampleRate: traceSampleRate,
+		},
 		Embeddings: OpenAIConfig{
 			BaseURL:       strings.TrimRight(loadString("EMBEDDINGS_BASE_URL", "http://localhost:11434/v1", strict), "/"),
 			APIKey:        loadString("EMBEDDINGS_API_KEY", "ollama", strict),
@@ -107,6 +119,15 @@ func load(strict bool) (Config, error) {
 			AllowedExtensions: csv(loadString("GITLAB_TEXT_EXTENSIONS", ".go,.py,.js,.jsx,.ts,.tsx,.vue,.java,.kt,.kts,.rb,.php,.cs,.c,.h,.cpp,.hpp,.rs,.swift,.scala,.sh,.bash,.zsh,.sql,.md,.txt,.rst,.adoc,.yaml,.yml,.json,.toml,.xml,.html,.css,.scss,.less,.proto,.graphql,.tf,.hcl,.gradle,.properties,.ini,.conf,.dockerfile", strict)),
 		},
 	}, nil
+}
+
+func firstEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func loadString(key, fallback string, strict bool) string {

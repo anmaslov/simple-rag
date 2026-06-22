@@ -11,6 +11,19 @@ docker compose up -d
 
 UI: <http://localhost:5173>, healthcheck: <http://localhost:8080/api/health>.
 
+## Kubernetes и observability
+
+API и worker поднимают отдельный служебный HTTP-порт `OBSERVABILITY_ADDR` (по умолчанию `:9090`):
+
+- `/startupz` — процесс полностью инициализирован;
+- `/livez` — процесс жив, без проверки внешних зависимостей;
+- `/readyz` — процесс готов к работе, включая доступность PostgreSQL;
+- `/metrics` — Prometheus-совместимые HTTP, Go runtime/process, PostgreSQL pool и worker job metrics для VictoriaMetrics.
+
+Трейсы входящих и исходящих HTTP-запросов и worker jobs экспортируются по OTLP/gRPC. Для Jaeger задайте `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger-collector:4317`; sampling настраивается через `OTEL_TRACES_SAMPLER_ARG` от `0` до `1`. Без endpoint экспорт трейсов отключён.
+
+Пример Deployment/Service с startup, readiness и liveness probes находится в [`deploy/kubernetes/backend.yaml`](./deploy/kubernetes/backend.yaml). Манифест ожидает Secret `simple-rag-env` с конфигурацией приложения.
+
 ## Добавление источников
 
 На странице **Sources**:

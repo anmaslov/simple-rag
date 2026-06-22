@@ -11,6 +11,19 @@ docker compose up -d
 
 Open the UI at <http://localhost:5173> and the healthcheck at <http://localhost:8080/api/health>.
 
+## Kubernetes and observability
+
+The API and worker expose a separate admin listener through `OBSERVABILITY_ADDR` (default `:9090`):
+
+- `/startupz` reports completed process initialization;
+- `/livez` reports process health without checking external dependencies;
+- `/readyz` includes PostgreSQL availability;
+- `/metrics` exposes Prometheus-compatible HTTP, Go runtime/process, PostgreSQL pool, and worker job metrics for VictoriaMetrics.
+
+Incoming/outgoing HTTP requests and worker jobs are traced over OTLP/gRPC. For Jaeger, set `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger-collector:4317`; configure sampling with `OTEL_TRACES_SAMPLER_ARG` from `0` to `1`. Trace export stays disabled when no endpoint is configured.
+
+See [`deploy/kubernetes/backend.yaml`](./deploy/kubernetes/backend.yaml) for Deployment/Service examples with startup, readiness, and liveness probes. The manifest expects a `simple-rag-env` Secret containing application configuration.
+
 ## Adding sources
 
 Open **Sources**:

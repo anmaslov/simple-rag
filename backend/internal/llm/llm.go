@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"confluence-rag/backend/internal/observability"
 )
 
 type Message struct {
@@ -45,6 +47,7 @@ func NewOpenAI(baseURL, apiKey, model string, temp float64, skipTLSVerify bool) 
 	if skipTLSVerify {
 		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} //nolint:gosec // Explicit corporate self-signed opt-in.
 	}
+	client.Transport = observability.WrapTransport(client.Transport)
 	return &OpenAIClient{baseURL: baseURL, apiKey: apiKey, model: model, defaultTemp: temp, client: client}
 }
 

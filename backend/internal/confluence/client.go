@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"confluence-rag/backend/internal/observability"
 )
 
 type Cursor struct {
@@ -73,7 +75,7 @@ type RESTClient struct {
 
 func New(cfg Config, log *slog.Logger) *RESTClient {
 	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.SkipTLSVerify}} //nolint:gosec // Explicit corporate self-signed opt-in.
-	return &RESTClient{cfg: cfg, http: &http.Client{Timeout: 60 * time.Second, Transport: tr}, log: log}
+	return &RESTClient{cfg: cfg, http: &http.Client{Timeout: 60 * time.Second, Transport: observability.WrapTransport(tr)}, log: log}
 }
 
 func (c *RESTClient) Test(ctx context.Context) error {

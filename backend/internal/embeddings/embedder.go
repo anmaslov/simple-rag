@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"confluence-rag/backend/internal/observability"
 )
 
 const (
@@ -72,6 +74,7 @@ func NewOpenAIWithOptions(
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // Explicit corporate self-signed opt-in.
 		client.Transport = transport
 	}
+	client.Transport = observability.WrapTransport(client.Transport)
 	if log == nil {
 		log = slog.Default()
 	}

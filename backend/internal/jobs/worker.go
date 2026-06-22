@@ -11,6 +11,11 @@ import (
 	"confluence-rag/backend/internal/domain"
 	"confluence-rag/backend/internal/embeddings"
 	"confluence-rag/backend/internal/models"
+	"confluence-rag/backend/internal/observability"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type Worker struct {
@@ -18,10 +23,15 @@ type Worker struct {
 	repo     domain.Repository
 	embedder embeddings.Embedder
 	log      *slog.Logger
+	metrics  *observability.WorkerMetrics
 }
 
-func NewWorker(cfg config.Config, repo domain.Repository, embedder embeddings.Embedder, log *slog.Logger) *Worker {
-	return &Worker{cfg: cfg, repo: repo, embedder: embedder, log: log}
+func NewWorker(cfg config.Config, repo domain.Repository, embedder embeddings.Embedder, log *slog.Logger, metrics ...*observability.WorkerMetrics) *Worker {
+	var workerMetrics *observability.WorkerMetrics
+	if len(metrics) > 0 {
+		workerMetrics = metrics[0]
+	}
+	return &Worker{cfg: cfg, repo: repo, embedder: embedder, log: log, metrics: workerMetrics}
 }
 
 func (w *Worker) Run(ctx context.Context) error {
@@ -30,6 +40,11 @@ func (w *Worker) Run(ctx context.Context) error {
 	for {
 		if err := w.tick(ctx); err != nil {
 			w.log.Error("worker tick failed", "error", err)
+			if w.metrics != nil {
+				w.metrics.Tick("error")
+			}
+		} else if w.metrics != nil {
+			w.metrics.Tick("success")
 		}
 		select {
 		case <-ctx.Done():
@@ -44,14 +59,30 @@ func (w *Worker) tick(ctx context.Context) error {
 	if err != nil || !ok {
 		return err
 	}
+	ctx, span := otel.Tracer("simple-rag/worker").Start(ctx, "sync_job",
+		trace.WithAttributes(
+			attribute.Int64("job.id", job.ID),
+			attribute.String("job.source_type", job.SourceType),
+			attribute.String("job.mode", job.Mode),
+		),
+	)
+	defer span.End()
+	finishMetrics := func(string) {}
+	if w.metrics != nil {
+		finishMetrics = w.metrics.StartJob(job.SourceType)
+	}
 	w.log.Info("claimed sync job", "job_id", job.ID, "source_type", job.SourceType, "scope_id", job.ScopeID, "mode", job.Mode)
 	if err := w.runJob(ctx, job); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "sync job failed")
+		finishMetrics("failed")
 		w.log.Error("sync job failed", "job_id", job.ID, "error", err)
 		return w.repo.FinishJob(ctx, job.ID, "failed", safeJobError(err))
 	}
 	if job.ScopeID != nil {
 		_ = w.repo.MarkScopeSynced(ctx, *job.ScopeID)
 	}
+	finishMetrics("success")
 	return w.repo.FinishJob(ctx, job.ID, "success", "")
 }
 
