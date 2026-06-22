@@ -9,30 +9,24 @@ import (
 	"confluence-rag/backend/internal/domain"
 	"confluence-rag/backend/internal/llm"
 	"confluence-rag/backend/internal/models"
-	"confluence-rag/backend/internal/search"
 )
 
-const systemPrompt = `Ты отвечаешь только на основе предоставленного контекста из корпоративного Confluence.
-Если в контексте нет ответа, скажи: "В проиндексированных материалах Confluence я не нашёл ответа".
-Не используй внешние знания.
-Не выдумывай.
-Если источники противоречат друг другу, явно укажи это.
-Не добавляй отдельный список источников: интерфейс покажет источники автоматически.`
+const emptyContextAnswer = "Информация не найдена в выбранных проиндексированных источниках"
 
-const (
-	maxHistoryMessages = 8
-	maxHistoryChars    = 6000
-	maxSearchHintChars = 800
-)
+const maxHistoryMessages = 8
+
+type Searcher interface {
+	Search(ctx context.Context, query string, scope models.SearchScope, topK int) ([]models.SearchResult, error)
+}
 
 type Service struct {
 	repo        domain.ChatRepository
-	search      *search.Service
+	search      Searcher
 	llm         llm.LLM
 	defaultTopK int
 }
 
-func New(repo domain.ChatRepository, search *search.Service, llm llm.LLM, defaultTopK int) *Service {
+func New(repo domain.ChatRepository, search Searcher, llm llm.LLM, defaultTopK int) *Service {
 	return &Service{repo: repo, search: search, llm: llm, defaultTopK: defaultTopK}
 }
 
@@ -50,73 +44,53 @@ type ChatStreamEvent struct {
 	Sources   []models.SearchResult `json:"sources,omitempty"`
 }
 
-func (s *Service) Chat(ctx context.Context, sessionID, message string, spaces []string, topK int) (ChatResult, error) {
-	history, err := s.loadHistory(ctx, sessionID)
+func (s *Service) Chat(ctx context.Context, sessionID, message string, scope models.SearchScope, topK int) (ChatResult, error) {
+	prepared, err := s.prepare(ctx, sessionID, message, scope, topK, preparationHooks{})
 	if err != nil {
 		return ChatResult{}, err
 	}
-	results, err := s.search.Search(ctx, buildSearchQuery(history, message), spaces, s.resolveTopK(topK))
-	if err != nil {
+
+	answer := emptyContextAnswer
+	if prepared.hasContext() {
+		resp, err := s.llm.Chat(ctx, prepared.request())
+		if err != nil {
+			return ChatResult{}, err
+		}
+		answer = resp.Content
+	}
+	if err := s.saveAssistant(ctx, prepared.sessionID, answer, prepared.results); err != nil {
 		return ChatResult{}, err
 	}
-	sessionID, err = s.repo.EnsureChatSession(ctx, sessionID, message)
-	if err != nil {
-		return ChatResult{}, err
-	}
-	if err := s.repo.SaveChatMessage(ctx, sessionID, "user", message, nil); err != nil {
-		return ChatResult{}, err
-	}
-	contextText := buildContext(results)
-	resp, err := s.llm.Chat(ctx, llm.ChatRequest{Messages: buildPromptMessages(contextText, history, message)})
-	if err != nil {
-		return ChatResult{}, err
-	}
-	if strings.TrimSpace(contextText) == "" {
-		resp.Content = "В проиндексированных материалах Confluence я не нашёл ответа"
-	}
-	srcJSON, err := json.Marshal(results)
-	if err != nil {
-		return ChatResult{}, err
-	}
-	if err := s.repo.SaveChatMessage(ctx, sessionID, "assistant", resp.Content, srcJSON); err != nil {
-		return ChatResult{}, err
-	}
-	return ChatResult{SessionID: sessionID, Answer: resp.Content, Sources: results}, nil
+	return ChatResult{SessionID: prepared.sessionID, Answer: answer, Sources: prepared.results}, nil
 }
 
-func (s *Service) ChatStream(ctx context.Context, sessionID, message string, spaces []string, topK int, emit func(ChatStreamEvent) error) error {
+func (s *Service) ChatStream(ctx context.Context, sessionID, message string, scope models.SearchScope, topK int, emit func(ChatStreamEvent) error) error {
 	if err := emit(ChatStreamEvent{Type: "status", Message: "Ищу релевантные источники"}); err != nil {
 		return err
 	}
-	history, err := s.loadHistory(ctx, sessionID)
+
+	prepared, err := s.prepare(ctx, sessionID, message, scope, topK, preparationHooks{
+		onSources: func(results []models.SearchResult) error {
+			return emit(ChatStreamEvent{
+				Type:    "sources",
+				Message: fmt.Sprintf("Нашел источников: %d", len(results)),
+				Sources: results,
+			})
+		},
+		onSession: func(sessionID string) error {
+			return emit(ChatStreamEvent{Type: "session", SessionID: sessionID})
+		},
+	})
 	if err != nil {
-		return err
-	}
-	results, err := s.search.Search(ctx, buildSearchQuery(history, message), spaces, s.resolveTopK(topK))
-	if err != nil {
-		return err
-	}
-	if err := emit(ChatStreamEvent{Type: "sources", Message: fmt.Sprintf("Нашел источников: %d", len(results)), Sources: results}); err != nil {
-		return err
-	}
-	sessionID, err = s.repo.EnsureChatSession(ctx, sessionID, message)
-	if err != nil {
-		return err
-	}
-	if err := emit(ChatStreamEvent{Type: "session", SessionID: sessionID}); err != nil {
-		return err
-	}
-	if err := s.repo.SaveChatMessage(ctx, sessionID, "user", message, nil); err != nil {
 		return err
 	}
 
-	contextText := buildContext(results)
-	if strings.TrimSpace(contextText) == "" {
-		answer := "В проиндексированных материалах Confluence я не нашёл ответа"
+	if !prepared.hasContext() {
+		answer := emptyContextAnswer
 		if err := emit(ChatStreamEvent{Type: "delta", Delta: answer}); err != nil {
 			return err
 		}
-		if err := s.repo.SaveChatMessage(ctx, sessionID, "assistant", answer, nil); err != nil {
+		if err := s.saveAssistant(ctx, prepared.sessionID, answer, prepared.results); err != nil {
 			return err
 		}
 		return emit(ChatStreamEvent{Type: "done"})
@@ -126,21 +100,87 @@ func (s *Service) ChatStream(ctx context.Context, sessionID, message string, spa
 		return err
 	}
 	var answer strings.Builder
-	err = s.llm.ChatStream(ctx, llm.ChatRequest{Messages: buildPromptMessages(contextText, history, message)}, func(delta string) error {
+	err = s.llm.ChatStream(ctx, prepared.request(), func(delta string) error {
 		answer.WriteString(delta)
 		return emit(ChatStreamEvent{Type: "delta", Delta: delta})
 	})
 	if err != nil {
 		return err
 	}
+	if err := s.saveAssistant(ctx, prepared.sessionID, answer.String(), prepared.results); err != nil {
+		return err
+	}
+	return emit(ChatStreamEvent{Type: "done"})
+}
+
+type preparedChat struct {
+	sessionID   string
+	message     string
+	history     []models.ChatMessage
+	results     []models.SearchResult
+	contextText string
+}
+
+func (p preparedChat) hasContext() bool {
+	return strings.TrimSpace(p.contextText) != ""
+}
+
+func (p preparedChat) request() llm.ChatRequest {
+	return llm.ChatRequest{Messages: buildPromptMessages(p.contextText, p.history, p.message)}
+}
+
+type preparationHooks struct {
+	onSources func([]models.SearchResult) error
+	onSession func(string) error
+}
+
+func (s *Service) prepare(
+	ctx context.Context,
+	sessionID, message string,
+	scope models.SearchScope,
+	topK int,
+	hooks preparationHooks,
+) (preparedChat, error) {
+	history, err := s.loadHistory(ctx, sessionID)
+	if err != nil {
+		return preparedChat{}, err
+	}
+	results, err := s.search.Search(ctx, buildSearchQuery(history, message), scope, s.resolveTopK(topK))
+	if err != nil {
+		return preparedChat{}, err
+	}
+	if hooks.onSources != nil {
+		if err := hooks.onSources(results); err != nil {
+			return preparedChat{}, err
+		}
+	}
+	sessionID, err = s.repo.EnsureChatSession(ctx, sessionID, message)
+	if err != nil {
+		return preparedChat{}, err
+	}
+	if hooks.onSession != nil {
+		if err := hooks.onSession(sessionID); err != nil {
+			return preparedChat{}, err
+		}
+	}
+	if err := s.repo.SaveChatMessage(ctx, sessionID, "user", message, nil); err != nil {
+		return preparedChat{}, err
+	}
+	return preparedChat{
+		sessionID:   sessionID,
+		message:     message,
+		history:     history,
+		results:     results,
+		contextText: buildContext(results),
+	}, nil
+}
+
+func (s *Service) saveAssistant(ctx context.Context, sessionID, answer string, results []models.SearchResult) error {
 	srcJSON, err := json.Marshal(results)
 	if err != nil {
 		return err
 	}
-	if err := s.repo.SaveChatMessage(ctx, sessionID, "assistant", answer.String(), srcJSON); err != nil {
-		return err
-	}
-	return emit(ChatStreamEvent{Type: "done"})
+	return s.repo.SaveChatMessage(ctx, sessionID, "assistant", answer, srcJSON)
 }
 
 func (s *Service) loadHistory(ctx context.Context, sessionID string) ([]models.ChatMessage, error) {
@@ -165,98 +205,4 @@ func (s *Service) resolveTopK(topK int) int {
 		return s.defaultTopK
 	}
 	return 10
-}
-
-func buildPromptMessages(contextText string, history []models.ChatMessage, message string) []llm.Message {
-	historyText := buildHistory(history)
-	var user strings.Builder
-	user.WriteString("Контекст Confluence:\n\n")
-	user.WriteString(contextText)
-	user.WriteString("\n")
-	if historyText != "" {
-		user.WriteString("История текущего диалога нужна только для понимания уточнений и местоимений. Факты бери из контекста Confluence выше.\n\n")
-		user.WriteString(historyText)
-		user.WriteString("\n\n")
-	}
-	user.WriteString("Текущий вопрос: ")
-	user.WriteString(message)
-
-	return []llm.Message{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: user.String()},
-	}
-}
-
-func buildSearchQuery(history []models.ChatMessage, message string) string {
-	hint := buildRecentUserHint(history)
-	if hint == "" {
-		return message
-	}
-	return truncateRunes(hint+"\n"+message, maxSearchHintChars)
-}
-
-func buildRecentUserHint(history []models.ChatMessage) string {
-	var items []string
-	for i := len(history) - 1; i >= 0 && len(items) < 3; i-- {
-		m := history[i]
-		if m.Role != "user" {
-			continue
-		}
-		content := strings.TrimSpace(m.Content)
-		if content == "" {
-			continue
-		}
-		items = append(items, content)
-	}
-	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
-		items[i], items[j] = items[j], items[i]
-	}
-	return strings.Join(items, "\n")
-}
-
-func buildHistory(history []models.ChatMessage) string {
-	var b strings.Builder
-	chars := 0
-	for _, m := range history {
-		content := strings.TrimSpace(m.Content)
-		if content == "" {
-			continue
-		}
-		role := "Пользователь"
-		if m.Role == "assistant" {
-			role = "Ассистент"
-		}
-		next := role + ": " + content + "\n"
-		nextChars := len([]rune(next))
-		if chars+nextChars > maxHistoryChars {
-			break
-		}
-		b.WriteString(next)
-		chars += nextChars
-	}
-	return strings.TrimSpace(b.String())
-}
-
-func buildContext(results []models.SearchResult) string {
-	var b strings.Builder
-	for i, r := range results {
-		fmt.Fprintf(&b, "[Источник %d]\nTitle: ", i+1)
-		b.WriteString(r.Title)
-		b.WriteString("\nURL: ")
-		b.WriteString(r.URL)
-		b.WriteString("\nSpace: ")
-		b.WriteString(r.SpaceKey)
-		b.WriteString("\nContent:\n")
-		b.WriteString(r.Chunk)
-		b.WriteString("\n\n")
-	}
-	return b.String()
-}
-
-func truncateRunes(s string, limit int) string {
-	r := []rune(s)
-	if len(r) <= limit {
-		return s
-	}
-	return string(r[len(r)-limit:])
 }

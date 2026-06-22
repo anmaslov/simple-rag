@@ -1,84 +1,55 @@
-# Confluence RAG
+# Knowledge RAG
 
-[![CI](https://img.shields.io/github/actions/workflow/status/anmaslov/simple-rag/ci.yml?branch=master&style=flat-square&logo=github&label=CI)](https://github.com/anmaslov/simple-rag/actions/workflows/ci.yml)
-[![Docker pulls](https://img.shields.io/docker/pulls/anmaslov/simple-rag-backend?style=flat-square&logo=docker&label=pulls)](https://hub.docker.com/r/anmaslov/simple-rag-backend)
-[![Multi arch](https://img.shields.io/badge/linux-amd64%20%7C%20arm64-555?style=flat-square&logo=linux)](./DEVELOPMENT.md)
+Self-hosted RAG for Confluence Server/Data Center and self-hosted GitLab. It stores managed connections and indexing scopes in PostgreSQL, synchronizes them in background jobs, and provides hybrid pgvector + PostgreSQL FTS search and RAG chat through a Go API and Vue 3 UI.
 
-Self-hosted RAG for Confluence. It indexes Confluence pages into PostgreSQL with pgvector, then provides search and chat over the indexed content through a Go backend and a Vue frontend.
-
-The default Docker Compose file is meant for regular users and pulls ready-to-run images from Docker Hub.
-
-## Services
-
-- `backend-api` - HTTP API.
-- `backend-worker` - background sync and indexing worker.
-- `frontend` - web UI.
-- `postgres` - PostgreSQL with pgvector.
-- `ollama` - optional local OpenAI-compatible provider.
-- `adminer` - optional database UI.
-
-## Quick Start
+## Quick start
 
 ```bash
 cp .env.example .env
 docker compose up -d
 ```
 
-Open:
+Open the UI at <http://localhost:5173> and the healthcheck at <http://localhost:8080/api/health>.
 
-- UI: http://localhost:5173
-- API healthcheck: http://localhost:8080/api/health
+## Adding sources
 
-The default images are:
+Open **Sources**:
 
-```text
-anmaslov/simple-rag-backend:${IMAGE_TAG:-latest}
-anmaslov/simple-rag-frontend:${IMAGE_TAG:-latest}
+1. Create a Confluence or GitLab connection and test it.
+2. For Confluence, add a page by ID/URL (optionally including descendants), or load and select spaces.
+3. For GitLab, search for a project, select a branch/tag, and add it as a repository scope.
+4. Use Sync for incremental refresh or Reindex to force rebuilding embeddings.
+
+Tokens/passwords are write-only: API responses contain only `has_token`. TLS verification is enabled by default. `skip_tls_verify` is a per-connection opt-in intended only for self-signed corporate certificates.
+
+GitLab tokens need API read access sufficient for projects, branches/tags, repository tree, and raw repository files (`read_api` is typically sufficient; deployments may also require `read_repository`).
+
+## GitLab indexing policy
+
+Only configured text extensions are indexed. Binary files, dependency/build directories, generated outputs, obvious credential files, and files larger than `GITLAB_MAX_FILE_BYTES` are skipped. Configure exclusions with the `GITLAB_*` variables in `.env.example`.
+
+## Existing Confluence installations
+
+Migration `003_multi_source.sql` copies existing `confluence_pages` and `page_chunks` into the universal document model without deleting the old tables or requiring a PostgreSQL volume reset. After migration, all Confluence connections and credentials are managed through **Sources**; Confluence connection environment variables are no longer used.
+
+## Search scope
+
+Search and Chat provide **All / Confluence / GitLab** controls. The API accepts:
+
+```json
+{
+  "query": "deployment timeout",
+  "scope": {
+    "source_types": ["gitlab"],
+    "connection_ids": [],
+    "scope_ids": [12]
+  },
+  "top_k": 10
+}
 ```
 
-To run a specific release:
+An empty scope searches all indexed sources.
 
-```bash
-IMAGE_TAG=v0.1.0 docker compose up -d
-```
+## Development and tests
 
-## Configuration
-
-Edit `.env` before the first run:
-
-```env
-CONFLUENCE_BASE_URL=https://confluence.company.com
-CONFLUENCE_TOKEN=...
-CONFLUENCE_AUTH_TYPE=bearer
-CONFLUENCE_ROOT_PAGE_IDS=123456,789012
-```
-
-For basic auth:
-
-```env
-CONFLUENCE_AUTH_TYPE=basic
-CONFLUENCE_USERNAME=user@company.com
-CONFLUENCE_TOKEN=api-token-or-password
-```
-
-The project expects OpenAI-compatible embeddings and chat completion endpoints. `.env.example` is configured for Ollama by default.
-
-## Local Ollama
-
-```bash
-docker compose --profile ollama up -d
-docker exec -it kedo-rag-ollama-1 ollama pull bge-m3
-docker exec -it kedo-rag-ollama-1 ollama pull qwen2.5:14b
-```
-
-## Usage
-
-1. Open http://localhost:5173/sync and start indexing.
-2. Use http://localhost:5173/search for semantic search.
-3. Use http://localhost:5173/chat for RAG answers with sources.
-
-## Developer Docs
-
-Development setup, tests, release publishing, and Docker image details are documented in [DEVELOPMENT.md](./DEVELOPMENT.md).
-
-Russian documentation is available in [README_RU.md](./README_RU.md).
+See [DEVELOPMENT.md](./DEVELOPMENT.md). Russian documentation is in [README_RU.md](./README_RU.md).

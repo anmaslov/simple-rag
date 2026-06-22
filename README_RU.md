@@ -1,17 +1,6 @@
-# Confluence RAG
+# Knowledge RAG
 
-Небольшой self-hosted RAG для Confluence. Он индексирует страницы Confluence в PostgreSQL с pgvector, а затем даёт поиск и чат по проиндексированным материалам через Go backend и Vue frontend.
-
-Обычный `docker-compose.yml` предназначен для пользователей и тянет готовые образы из Docker Hub.
-
-## Сервисы
-
-- `backend-api` - HTTP API.
-- `backend-worker` - воркер синхронизации и индексации.
-- `frontend` - web UI.
-- `postgres` - PostgreSQL с pgvector.
-- `ollama` - опциональный локальный OpenAI-compatible провайдер.
-- `adminer` - опциональный UI для базы.
+Self-hosted RAG для Confluence Server/Data Center и self-hosted GitLab. Подключения и области индексации хранятся в PostgreSQL, синхронизация выполняется фоновыми jobs, а поиск объединяет pgvector и PostgreSQL FTS.
 
 ## Быстрый старт
 
@@ -20,59 +9,31 @@ cp .env.example .env
 docker compose up -d
 ```
 
-После запуска:
+UI: <http://localhost:5173>, healthcheck: <http://localhost:8080/api/health>.
 
-- UI: http://localhost:5173
-- API healthcheck: http://localhost:8080/api/health
+## Добавление источников
 
-По умолчанию используются образы:
+На странице **Sources**:
 
-```text
-anmaslov/simple-rag-backend:${IMAGE_TAG:-latest}
-anmaslov/simple-rag-frontend:${IMAGE_TAG:-latest}
-```
+1. Создайте и проверьте подключение Confluence или GitLab.
+2. Для Confluence добавьте страницу по ID/URL (с дочерними страницами или без них) либо загрузите и выберите пространства.
+3. Для GitLab найдите проект, выберите branch/tag и добавьте repository scope.
+4. `Sync` запускает повторную/incremental-синхронизацию, `Reindex` принудительно пересоздаёт embeddings.
 
-Чтобы запустить конкретную версию:
+Токены и пароли доступны только на запись: API возвращает лишь `has_token`. Проверка TLS включена по умолчанию. `skip_tls_verify` включается отдельно для конкретного подключения и предназначен только для self-signed сертификатов.
 
-```bash
-IMAGE_TAG=v0.1.0 docker compose up -d
-```
+GitLab token должен иметь права чтения API и репозитория (`read_api`, а при требованиях вашей установки также `read_repository`).
 
-## Настройка
+## Ограничения GitLab
 
-Перед первым запуском поправьте `.env`:
+Индексируются только настроенные текстовые расширения. Пропускаются бинарные файлы, dependency/build/vendor directories, generated artifacts, очевидные credential-файлы и файлы больше `GITLAB_MAX_FILE_BYTES`. Политика настраивается переменными `GITLAB_*` из `.env.example`.
 
-```env
-CONFLUENCE_BASE_URL=https://confluence.company.ru
-CONFLUENCE_TOKEN=...
-CONFLUENCE_AUTH_TYPE=bearer
-CONFLUENCE_ROOT_PAGE_IDS=123456,789012
-```
+## Миграция со старой конфигурации
 
-Для basic auth:
+Миграция `003_multi_source.sql` безопасно переносит существующие `confluence_pages/page_chunks` в `documents/document_chunks`, не удаляет старые таблицы и не требует пересоздания PostgreSQL volume. После миграции подключения и credentials Confluence управляются только через страницу **Sources**; переменные подключения Confluence в env больше не используются.
 
-```env
-CONFLUENCE_AUTH_TYPE=basic
-CONFLUENCE_USERNAME=user@company.ru
-CONFLUENCE_TOKEN=api-token-or-password
-```
+## Поиск
 
-Проект ожидает OpenAI-compatible endpoints для embeddings и chat completions. `.env.example` по умолчанию настроен под Ollama.
+Search и Chat имеют переключатель **Все / Confluence / GitLab** и фильтры подключений/scopes. Пустой scope означает поиск по всем проиндексированным источникам.
 
-## Локальная Ollama
-
-```bash
-docker compose --profile ollama up -d
-docker exec -it kedo-rag-ollama-1 ollama pull bge-m3
-docker exec -it kedo-rag-ollama-1 ollama pull qwen2.5:14b
-```
-
-## Использование
-
-1. Откройте http://localhost:5173/sync и запустите индексацию.
-2. Используйте http://localhost:5173/search для поиска.
-3. Используйте http://localhost:5173/chat для RAG-ответов с источниками.
-
-## Для разработчиков
-
-Разработка, тесты, публикация релизов и детали Docker-образов описаны в [DEVELOPMENT.md](./DEVELOPMENT.md).
+Команды разработки и тестов описаны в [DEVELOPMENT.md](./DEVELOPMENT.md).
