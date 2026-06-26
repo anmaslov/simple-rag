@@ -335,6 +335,21 @@ async function syncScope(item: SourceScope, force = false) {
   }
 }
 
+async function cancelJob(job: Job) {
+  if (!confirm(`Остановить задачу #${job.id}?`)) return
+  busy.value = `job-cancel-${job.id}`
+  clearMessages()
+  try {
+    await api(`/api/jobs/${job.id}/cancel`, { method: 'POST' })
+    notice.value = `Задача #${job.id} остановлена.`
+    await load(false)
+  } catch (e: any) {
+    error.value = e.message
+  } finally {
+    busy.value = ''
+  }
+}
+
 async function deleteScope(item: SourceScope) {
   if (!confirm(`Удалить источник «${item.name}» и все его документы из индекса?`)) return
   busy.value = `scope-delete-${item.id}`
@@ -364,6 +379,10 @@ function formatDate(value?: string) {
   return value
     ? new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value))
     : 'Ещё не запускалась'
+}
+
+function canCancelJob(job: Job) {
+  return job.status === 'pending' || job.status === 'running'
 }
 
 function scopeTypeLabel(type: string) {
@@ -616,7 +635,7 @@ onMounted(load)
         </div>
         <div class="table-card">
           <table>
-            <thead><tr><th>Job</th><th>Статус</th><th>Режим</th><th>Источник</th><th>Найдено</th><th>Обновлено</th><th>Пропущено</th><th>Создана</th><th>Ошибка</th></tr></thead>
+            <thead><tr><th>Job</th><th>Статус</th><th>Режим</th><th>Источник</th><th>Найдено</th><th>Обновлено</th><th>Пропущено</th><th>Создана</th><th>Ошибка</th><th>Действия</th></tr></thead>
             <tbody>
               <tr v-for="job in visibleJobs" :key="job.id">
                 <td class="mono">#{{ job.id }}</td>
@@ -628,6 +647,17 @@ onMounted(load)
                 <td>{{ job.documents_skipped }}</td>
                 <td>{{ formatDate(job.created_at) }}</td>
                 <td class="error-cell">{{ job.error_message || '—' }}</td>
+                <td>
+                  <button
+                    v-if="canCancelJob(job)"
+                    class="danger-button table-action"
+                    :disabled="busy === `job-cancel-${job.id}`"
+                    @click="cancelJob(job)"
+                  >
+                    {{ busy === `job-cancel-${job.id}` ? 'Останавливаю…' : 'Остановить' }}
+                  </button>
+                  <span v-else class="muted">—</span>
+                </td>
               </tr>
             </tbody>
           </table>

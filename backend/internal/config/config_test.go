@@ -21,6 +21,7 @@ func TestLoadValidatedParsesExplicitEnvironment(t *testing.T) {
 	t.Setenv("EMBEDDINGS_BASE_URL", "https://embeddings.example/v1/")
 	t.Setenv("EMBEDDINGS_MODEL", "embed-model")
 	t.Setenv("EMBEDDINGS_DIM", "768")
+	t.Setenv("EMBEDDINGS_SEND_DIMENSION", "false")
 	t.Setenv("EMBEDDINGS_SKIP_TLS_VERIFY", "true")
 	t.Setenv("LLM_BASE_URL", "http://llm.example/v1/")
 	t.Setenv("LLM_MODEL", "llm-model")
@@ -61,7 +62,10 @@ func TestLoadValidatedParsesExplicitEnvironment(t *testing.T) {
 	if cfg.Embeddings.BaseURL != "https://embeddings.example/v1" {
 		t.Errorf("Embeddings.BaseURL = %q", cfg.Embeddings.BaseURL)
 	}
-	if cfg.Embeddings.Model != "embed-model" || cfg.Embeddings.Dim != 768 || !cfg.Embeddings.SkipTLSVerify {
+	if cfg.Embeddings.Model != "embed-model" ||
+		cfg.Embeddings.Dim != 768 ||
+		cfg.Embeddings.SendDimension ||
+		!cfg.Embeddings.SkipTLSVerify {
 		t.Errorf("Embeddings = %+v", cfg.Embeddings)
 	}
 	if cfg.LLM.BaseURL != "http://llm.example/v1" {
@@ -97,6 +101,7 @@ func TestLoadValidatedRejectsInvalidExplicitEnvironment(t *testing.T) {
 		value string
 	}{
 		{name: "embeddings dimension", key: "EMBEDDINGS_DIM", value: "many"},
+		{name: "embeddings send dimension flag", key: "EMBEDDINGS_SEND_DIMENSION", value: "sometimes"},
 		{name: "embeddings TLS flag", key: "EMBEDDINGS_SKIP_TLS_VERIFY", value: "sometimes"},
 		{name: "LLM temperature", key: "LLM_TEMPERATURE", value: "warm"},
 		{name: "LLM TLS flag", key: "LLM_SKIP_TLS_VERIFY", value: "sometimes"},
@@ -275,6 +280,7 @@ func setValidEnvironment(t *testing.T) {
 		"EMBEDDINGS_API_KEY":         "ollama",
 		"EMBEDDINGS_MODEL":           "bge-m3",
 		"EMBEDDINGS_DIM":             "1024",
+		"EMBEDDINGS_SEND_DIMENSION":  "true",
 		"EMBEDDINGS_SKIP_TLS_VERIFY": "false",
 		"LLM_BASE_URL":               "http://localhost:11434/v1",
 		"LLM_API_KEY":                "ollama",

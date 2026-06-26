@@ -86,6 +86,8 @@ type PagesRepository interface {
 type SyncJobsRepository interface {
 	CreateSourceSyncJob(context.Context, string, int64, int64, string, bool) (models.SyncJob, error)
 	ClaimNextJob(ctx context.Context) (models.SyncJob, bool, error)
+	CancelJob(ctx context.Context, id int64) (models.SyncJob, error)
+	IsJobCancelled(ctx context.Context, id int64) (bool, error)
 	FinishJob(ctx context.Context, id int64, status, msg string) error
 	IncJob(ctx context.Context, id int64, found, indexed, skipped int) error
 	ListJobs(ctx context.Context) ([]models.SyncJob, error)

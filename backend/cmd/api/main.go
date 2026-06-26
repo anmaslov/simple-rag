@@ -64,6 +64,7 @@ func run(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		cfg.Embeddings.SkipTLSVerify,
 		log,
 		embeddings.WithExpectedDimension(cfg.Embeddings.Dim),
+		embeddings.WithRequestedDimension(requestedEmbeddingDimension(cfg)),
 	)
 	searchSvc := search.New(repo, embedder, cfg.Search.VectorWeight, cfg.Search.KeywordWeight)
 	llmClient := llm.NewOpenAI(cfg.LLM.BaseURL, cfg.LLM.APIKey, cfg.LLM.Model, cfg.LLM.Temperature, cfg.LLM.SkipTLSVerify)
@@ -103,4 +104,11 @@ func run(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		return fmt.Errorf("shutdown HTTP servers: %w", err)
 	}
 	return serveErr
+}
+
+func requestedEmbeddingDimension(cfg config.Config) int {
+	if !cfg.Embeddings.SendDimension {
+		return 0
+	}
+	return cfg.Embeddings.Dim
 }

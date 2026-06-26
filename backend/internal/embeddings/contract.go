@@ -49,6 +49,12 @@ type openAIEmbeddingResponse struct {
 	Data []openAIEmbedding `json:"data"`
 }
 
+type openAIEmbeddingRequest struct {
+	Model      string   `json:"model"`
+	Input      []string `json:"input"`
+	Dimensions int      `json:"dimensions,omitempty"`
+}
+
 type openAIEmbedding struct {
 	Embedding []float32 `json:"embedding"`
 	Index     *int      `json:"index"`

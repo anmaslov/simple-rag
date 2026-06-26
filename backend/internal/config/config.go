@@ -33,6 +33,10 @@ func load(strict bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	embeddingsSendDimension, err := loadBool("EMBEDDINGS_SEND_DIMENSION", true, strict)
+	if err != nil {
+		return Config{}, err
+	}
 	llmTemperature, err := loadFloat("LLM_TEMPERATURE", 0.1, strict)
 	if err != nil {
 		return Config{}, err
@@ -98,6 +102,7 @@ func load(strict bool) (Config, error) {
 			APIKey:        loadString("EMBEDDINGS_API_KEY", "ollama", strict),
 			Model:         loadString("EMBEDDINGS_MODEL", "bge-m3", strict),
 			Dim:           embeddingsDim,
+			SendDimension: embeddingsSendDimension,
 			SkipTLSVerify: embeddingsSkipTLSVerify,
 		},
 		LLM: LLMConfig{

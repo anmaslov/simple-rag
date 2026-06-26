@@ -60,3 +60,23 @@ func TestClaimNextJobQuery(t *testing.T) {
 		t.Fatalf("unexpected args: want %#v, got %#v", want, args)
 	}
 }
+
+func TestFinishJobDoesNotOverwriteCancelledJob(t *testing.T) {
+	sql, args, err := psql.Update("sync_jobs").
+		Set("status", "success").
+		Set("error_message", "").
+		Set("finished_at", sq.Expr("now()")).
+		Set("updated_at", sq.Expr("now()")).
+		Where(sq.Eq{"id": int64(9)}).
+		Where(sq.NotEq{"status": "cancelled"}).
+		ToSql()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sql, "status <> $") {
+		t.Fatalf("expected SQL to preserve cancelled jobs: %s", sql)
+	}
+	if want := []any{"success", "", int64(9), "cancelled"}; !reflect.DeepEqual(args, want) {
+		t.Fatalf("unexpected args: want %#v, got %#v", want, args)
+	}
+}

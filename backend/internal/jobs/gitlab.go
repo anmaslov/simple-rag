@@ -43,6 +43,9 @@ func (w *Worker) syncGitLab(ctx context.Context, job models.SyncJob, conn models
 	policy := gitlab.FilePolicy{MaxBytes: w.cfg.GitLab.MaxFileBytes, ExcludedDirs: w.cfg.GitLab.ExcludedDirs, ExcludedFiles: w.cfg.GitLab.ExcludedFiles, AllowedExtensions: w.cfg.GitLab.AllowedExtensions}
 	seen := make([]string, 0, len(tree))
 	for _, item := range tree {
+		if err := w.ensureJobActive(ctx, job.ID); err != nil {
+			return err
+		}
 		if item.Type != "blob" || !policy.Allow(item.Path, 0, nil) {
 			continue
 		}
@@ -71,8 +74,14 @@ func (w *Worker) syncGitLab(ctx context.Context, job models.SyncJob, conn models
 			Title: item.Path, URL: webURL, Content: content, ContentHash: chunker.Hash(content), Metadata: meta,
 		}, job.ForceReindex, prefix)
 		if err != nil {
+			if errors.Is(err, errJobCancelled) {
+				return err
+			}
 			w.skip(job.ID, item.Path, err)
 		}
+	}
+	if err := w.ensureJobActive(ctx, job.ID); err != nil {
+		return err
 	}
 	if _, err := w.repo.DeleteDocumentsNotSeen(ctx, scope.ID, seen); err != nil {
 		return err

@@ -45,7 +45,7 @@ func TestOpenAIEmbedderEmbedSuccess(t *testing.T) {
 			t.Parallel()
 
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				assertRequest(t, r, []string{"first", "second"})
+				assertRequest(t, r, []string{"first", "second"}, 0)
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = io.WriteString(w, tt.response)
 			}))
@@ -211,6 +211,22 @@ func TestOpenAIEmbedderStatuses(t *testing.T) {
 	}
 }
 
+func TestOpenAIEmbedderSendsRequestedDimension(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertRequest(t, r, []string{"text"}, 1024)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[{"index":0,"embedding":[1,2]}]}`)
+	}))
+	defer server.Close()
+
+	embedder := newTestEmbedder(server, WithRequestedDimension(1024))
+	if _, err := embedder.Embed(context.Background(), []string{"text"}); err != nil {
+		t.Fatalf("Embed() error = %v", err)
+	}
+}
+
 func TestOpenAIEmbedderCancellation(t *testing.T) {
 	t.Parallel()
 
@@ -260,7 +276,7 @@ func newTestEmbedder(server *httptest.Server, options ...OpenAIOption) *OpenAIEm
 	)
 }
 
-func assertRequest(t *testing.T, request *http.Request, wantInput []string) {
+func assertRequest(t *testing.T, request *http.Request, wantInput []string, wantDimensions int) {
 	t.Helper()
 
 	if request.Method != http.MethodPost {
@@ -274,8 +290,9 @@ func assertRequest(t *testing.T, request *http.Request, wantInput []string) {
 	}
 
 	var body struct {
-		Model string   `json:"model"`
-		Input []string `json:"input"`
+		Model      string   `json:"model"`
+		Input      []string `json:"input"`
+		Dimensions int      `json:"dimensions"`
 	}
 	if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 		t.Fatalf("decode request: %v", err)
@@ -285,5 +302,8 @@ func assertRequest(t *testing.T, request *http.Request, wantInput []string) {
 	}
 	if !reflect.DeepEqual(body.Input, wantInput) {
 		t.Errorf("input = %#v, want %#v", body.Input, wantInput)
+	}
+	if body.Dimensions != wantDimensions {
+		t.Errorf("dimensions = %d, want %d", body.Dimensions, wantDimensions)
 	}
 }

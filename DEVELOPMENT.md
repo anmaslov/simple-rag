@@ -111,7 +111,7 @@ docker compose up -d
 
 `vector dimension mismatch`
 
-The migration creates `page_chunks.embedding vector(1024)`. If your embeddings model returns a different vector size, update `EMBEDDINGS_DIM`, adjust the migration, and recreate the dev database volume.
+The migration creates `page_chunks.embedding vector(1024)` and `document_chunks.embedding vector(1024)`. `EMBEDDINGS_DIM` must match the stored vector size. By default the app also sends this value as the OpenAI-compatible embeddings `dimensions` parameter (`EMBEDDINGS_SEND_DIMENSION=true`), so compatible providers can return 1024-dimensional vectors from larger models. If your provider rejects `dimensions`, set `EMBEDDINGS_SEND_DIMENSION=false`; then the model must natively return 1024 dimensions, or you must change the vector column dimensions and reindex.
 
 `LLM/embeddings status 404`
 

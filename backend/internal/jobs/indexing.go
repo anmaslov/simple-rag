@@ -11,6 +11,9 @@ import (
 )
 
 func (w *Worker) indexDocument(ctx context.Context, jobID int64, in domain.DocumentInput, force bool, chunkPrefix string) error {
+	if err := w.ensureJobActive(ctx, jobID); err != nil {
+		return err
+	}
 	doc, unchanged, err := w.repo.UpsertDocument(ctx, in)
 	if err != nil {
 		return err
@@ -37,6 +40,9 @@ func (w *Worker) indexDocument(ctx context.Context, jobID int64, in domain.Docum
 		return err
 	}
 	if err := validateEmbeddingBatch(vecs, len(chunks)); err != nil {
+		return err
+	}
+	if err := w.ensureJobActive(ctx, jobID); err != nil {
 		return err
 	}
 	inputs := make([]domain.ChunkInput, 0, len(chunks))

@@ -33,6 +33,7 @@ type OpenAIConfig struct {
 	APIKey        string
 	Model         string
 	Dim           int
+	SendDimension bool
 	SkipTLSVerify bool
 }
 

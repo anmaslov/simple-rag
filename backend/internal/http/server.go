@@ -51,6 +51,7 @@ func NewRouterWithMiddleware(
 	r.Route("/api/scopes", s.scopeRoutes)
 	r.Get("/api/documents", s.documents)
 	r.Get("/api/jobs", s.syncStatus)
+	r.Post("/api/jobs/{id}/cancel", s.cancelJob)
 
 	// Compatibility endpoints.
 	r.Get("/api/spaces", s.spaces)

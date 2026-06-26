@@ -18,6 +18,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+var errJobCancelled = errors.New("sync job cancelled")
+
 type Worker struct {
 	cfg      config.Config
 	repo     domain.Repository
@@ -73,17 +75,42 @@ func (w *Worker) tick(ctx context.Context) error {
 	}
 	w.log.Info("claimed sync job", "job_id", job.ID, "source_type", job.SourceType, "scope_id", job.ScopeID, "mode", job.Mode)
 	if err := w.runJob(ctx, job); err != nil {
+		if errors.Is(err, errJobCancelled) {
+			finishMetrics("cancelled")
+			w.log.Info("sync job cancelled", "job_id", job.ID)
+			return nil
+		}
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "sync job failed")
 		finishMetrics("failed")
 		w.log.Error("sync job failed", "job_id", job.ID, "error", err)
 		return w.repo.FinishJob(ctx, job.ID, "failed", safeJobError(err))
 	}
+	cancelled, err := w.repo.IsJobCancelled(ctx, job.ID)
+	if err != nil {
+		return err
+	}
+	if cancelled {
+		finishMetrics("cancelled")
+		w.log.Info("sync job cancelled", "job_id", job.ID)
+		return nil
+	}
 	if job.ScopeID != nil {
 		_ = w.repo.MarkScopeSynced(ctx, *job.ScopeID)
 	}
 	finishMetrics("success")
 	return w.repo.FinishJob(ctx, job.ID, "success", "")
+}
+
+func (w *Worker) ensureJobActive(ctx context.Context, jobID int64) error {
+	cancelled, err := w.repo.IsJobCancelled(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	if cancelled {
+		return errJobCancelled
+	}
+	return nil
 }
 
 func (w *Worker) runJob(ctx context.Context, job models.SyncJob) error {

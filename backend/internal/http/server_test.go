@@ -50,6 +50,7 @@ func TestNewRouterRegistersPublicAPI(t *testing.T) {
 		"POST /api/chat/stream",
 		"POST /api/connections/",
 		"POST /api/connections/{id}/test",
+		"POST /api/jobs/{id}/cancel",
 		"POST /api/scopes/",
 		"POST /api/scopes/{id}/sync",
 		"POST /api/search",

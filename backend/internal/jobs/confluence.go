@@ -51,12 +51,21 @@ func (w *Worker) syncConfluence(ctx context.Context, job models.SyncJob, conn mo
 func (w *Worker) syncSpace(ctx context.Context, jobID int64, client confluence.Client, scope models.SourceScope, space string, force bool) error {
 	cur := confluence.Cursor{Limit: w.cfg.Sources.PageLimit}
 	for pageNo := 0; pageNo < 10000; pageNo++ {
+		if err := w.ensureJobActive(ctx, jobID); err != nil {
+			return err
+		}
 		batch, err := client.ListPagesBySpace(ctx, space, cur)
 		if err != nil {
 			return err
 		}
 		for _, p := range batch.Pages {
+			if err := w.ensureJobActive(ctx, jobID); err != nil {
+				return err
+			}
 			if err := w.countAndIndexPage(ctx, jobID, scope, p, force); err != nil {
+				if errors.Is(err, errJobCancelled) {
+					return err
+				}
 				w.skip(jobID, p.ID, err)
 			}
 		}
@@ -69,11 +78,17 @@ func (w *Worker) syncSpace(ctx context.Context, jobID int64, client confluence.C
 }
 
 func (w *Worker) syncPageTree(ctx context.Context, jobID int64, client confluence.Client, scope models.SourceScope, page confluence.Page, force bool, visited map[string]struct{}) error {
+	if err := w.ensureJobActive(ctx, jobID); err != nil {
+		return err
+	}
 	if _, ok := visited[page.ID]; ok {
 		return nil
 	}
 	visited[page.ID] = struct{}{}
 	if err := w.countAndIndexPage(ctx, jobID, scope, page, force); err != nil {
+		if errors.Is(err, errJobCancelled) {
+			return err
+		}
 		w.skip(jobID, page.ID, err)
 	}
 	cur := confluence.Cursor{Limit: w.cfg.Sources.PageLimit}
@@ -84,6 +99,9 @@ func (w *Worker) syncPageTree(ctx context.Context, jobID int64, client confluenc
 		}
 		for _, child := range batch.Pages {
 			if err := w.syncPageTree(ctx, jobID, client, scope, child, force, visited); err != nil {
+				if errors.Is(err, errJobCancelled) {
+					return err
+				}
 				w.skip(jobID, child.ID, err)
 			}
 		}

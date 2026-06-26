@@ -46,16 +46,25 @@ func WithExpectedDimension(dimension int) OpenAIOption {
 	}
 }
 
+// WithRequestedDimension asks compatible OpenAI-style providers to return
+// embeddings with the configured dimensionality.
+func WithRequestedDimension(dimension int) OpenAIOption {
+	return func(embedder *OpenAIEmbedder) {
+		embedder.requestedDimension = dimension
+	}
+}
+
 type OpenAIEmbedder struct {
-	baseURL           string
-	apiKey            string
-	model             string
-	client            HTTPDoer
-	log               *slog.Logger
-	expectedDimension int
-	maxAttempts       int
-	retryBackoff      func(attempt int) time.Duration
-	sleep             func(context.Context, time.Duration) error
+	baseURL            string
+	apiKey             string
+	model              string
+	client             HTTPDoer
+	log                *slog.Logger
+	expectedDimension  int
+	requestedDimension int
+	maxAttempts        int
+	retryBackoff       func(attempt int) time.Duration
+	sleep              func(context.Context, time.Duration) error
 }
 
 func NewOpenAI(baseURL, apiKey, model string, skipTLSVerify bool, log *slog.Logger) *OpenAIEmbedder {
@@ -104,13 +113,11 @@ func (e *OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32
 		return nil, nil
 	}
 
-	body, err := json.Marshal(struct {
-		Model string   `json:"model"`
-		Input []string `json:"input"`
-	}{
-		Model: e.model,
-		Input: texts,
-	})
+	request := openAIEmbeddingRequest{Model: e.model, Input: texts}
+	if e.requestedDimension > 0 {
+		request.Dimensions = e.requestedDimension
+	}
+	body, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("marshal embeddings request: %w", err)
 	}

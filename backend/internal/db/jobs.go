@@ -82,12 +82,43 @@ func (r *Repository) FinishJob(ctx context.Context, id int64, status, msg string
 		Set("finished_at", sq.Expr("now()")).
 		Set("updated_at", sq.Expr("now()")).
 		Where(sq.Eq{"id": id}).
+		Where(sq.NotEq{"status": "cancelled"}).
 		ToSql()
 	if err != nil {
 		return err
 	}
 	_, err = r.pool.Exec(ctx, q, args...)
 	return err
+}
+
+func (r *Repository) CancelJob(ctx context.Context, id int64) (models.SyncJob, error) {
+	q, args, err := psql.Update("sync_jobs").
+		Set("status", "cancelled").
+		Set("error_message", "cancelled by user").
+		Set("finished_at", sq.Expr("now()")).
+		Set("updated_at", sq.Expr("now()")).
+		Where(sq.Eq{"id": id, "status": []string{"pending", "running"}}).
+		Suffix("RETURNING " + jobColumns).
+		ToSql()
+	if err != nil {
+		return models.SyncJob{}, err
+	}
+	return scanJob(r.pool.QueryRow(ctx, q, args...))
+}
+
+func (r *Repository) IsJobCancelled(ctx context.Context, id int64) (bool, error) {
+	q, args, err := psql.Select("count(*)").
+		From("sync_jobs").
+		Where(sq.Eq{"id": id, "status": "cancelled"}).
+		ToSql()
+	if err != nil {
+		return false, err
+	}
+	var count int
+	if err := r.pool.QueryRow(ctx, q, args...).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func (r *Repository) IncJob(ctx context.Context, id int64, found, indexed, skipped int) error {
