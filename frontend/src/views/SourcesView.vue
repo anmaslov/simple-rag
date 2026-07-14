@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { api, type Connection, type SourceScope } from '../api/client'
 
 type Section = 'connections' | 'sources' | 'jobs'
@@ -23,6 +24,8 @@ type GitRef = { name: string }
 
 const activeSection = ref<Section>('connections')
 const activeSource = ref<SourceType>('confluence')
+const route = useRoute()
+const router = useRouter()
 const connections = ref<Connection[]>([])
 const scopes = ref<SourceScope[]>([])
 const jobs = ref<Job[]>([])
@@ -59,6 +62,7 @@ const visibleConnections = computed(() => activeSource.value === 'confluence' ? 
 const visibleScopes = computed(() => scopes.value.filter((item) => item.source_type === activeSource.value))
 const visibleJobs = computed(() => jobs.value.filter((item) => item.source_type === activeSource.value))
 const connectionName = computed(() => new Map(connections.value.map((item) => [item.id, item.name])))
+const scopeByID = computed(() => new Map(scopes.value.map((item) => [item.id, item])))
 
 async function load(showSpinner = true) {
   if (showSpinner) loading.value = true
@@ -78,6 +82,10 @@ async function load(showSpinner = true) {
   } finally {
     loading.value = false
   }
+}
+
+function loadCurrentSection() {
+  void load()
 }
 
 function setDefaultConnections() {
@@ -368,6 +376,7 @@ async function deleteScope(item: SourceScope) {
 function switchSection(section: Section) {
   activeSection.value = section
   clearMessages()
+  void router.replace({ query: { ...route.query, section } })
 }
 
 function switchSource(source: SourceType) {
@@ -389,7 +398,47 @@ function scopeTypeLabel(type: string) {
   return ({ page: 'Страница', space: 'Пространство', repository: 'Репозиторий' } as Record<string, string>)[type] || type
 }
 
-onMounted(load)
+function scopeConfig(item?: SourceScope, key?: string) {
+  if (!item || !key) return ''
+  const value = item.config?.[key]
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
+}
+
+function sourceLabelForScope(item?: SourceScope) {
+  if (!item) return 'Удалённый источник'
+  if (item.source_type === 'gitlab') {
+    const project = scopeConfig(item, 'project_path') || item.name.replace(/\s+@\s+.+$/, '')
+    const ref = scopeConfig(item, 'ref')
+    return ref ? `${project} @ ${ref}` : project
+  }
+  const space = scopeConfig(item, 'space_key')
+  if (space && item.scope_type === 'space') return `${item.name} (${space})`
+  if (space) return `${item.name} · ${space}`
+  return item.name
+}
+
+function jobSourceTitle(job: Job) {
+  return sourceLabelForScope(job.scope_id ? scopeByID.value.get(job.scope_id) : undefined)
+}
+
+function jobSourceMeta(job: Job) {
+  const scope = job.scope_id ? scopeByID.value.get(job.scope_id) : undefined
+  if (!scope) return job.connection_id ? connectionName.value.get(job.connection_id) || `Connection #${job.connection_id}` : 'Источник удалён'
+  return `${scopeTypeLabel(scope.scope_type)} · ${connectionName.value.get(scope.connection_id) || `Connection #${scope.connection_id}`}`
+}
+
+onMounted(() => {
+  activeSection.value = sectionFromQuery(route.query.section)
+  void load()
+})
+
+watch(() => route.query.section, (value) => {
+  activeSection.value = sectionFromQuery(value)
+})
+
+function sectionFromQuery(value: unknown): Section {
+  return value === 'sources' || value === 'jobs' || value === 'connections' ? value : 'connections'
+}
 </script>
 
 <template>
@@ -399,7 +448,7 @@ onMounted(load)
         <h2>Источники знаний</h2>
         <p>Сначала настройте подключения, затем добавьте страницы, пространства или репозитории.</p>
       </div>
-      <button class="ghost-button" :disabled="loading" @click="load()">
+      <button class="ghost-button" :disabled="loading" @click="loadCurrentSection">
         {{ loading ? 'Обновляю…' : 'Обновить' }}
       </button>
     </div>
@@ -641,7 +690,10 @@ onMounted(load)
                 <td class="mono">#{{ job.id }}</td>
                 <td><span :class="['status-pill', job.status]">{{ job.status }}</span></td>
                 <td>{{ job.mode }}</td>
-                <td>{{ job.scope_id ? `Scope #${job.scope_id}` : 'Удалённый источник' }}</td>
+                <td class="source-cell">
+                  <strong>{{ jobSourceTitle(job) }}</strong>
+                  <small>{{ jobSourceMeta(job) }}</small>
+                </td>
                 <td>{{ job.documents_found }}</td>
                 <td class="good">{{ job.documents_indexed }}</td>
                 <td>{{ job.documents_skipped }}</td>

@@ -199,6 +199,31 @@ function sourceHost(url: string) {
   }
 }
 
+function sourceKind(source: SearchResult) {
+  return source.source_type === 'gitlab' ? 'GitLab' : 'Confluence'
+}
+
+function sourceTitle(source: SearchResult) {
+  if (source.source_type === 'gitlab') {
+    return source.repository || source.source_label || `GitLab scope #${source.scope_id}`
+  }
+  return source.space_key || source.source_label || `Confluence scope #${source.scope_id}`
+}
+
+function sourceDetail(source: SearchResult) {
+  const parts = []
+  if (source.source_type === 'gitlab') {
+    if (source.ref) parts.push(source.ref)
+    if (source.file_path) parts.push(source.file_path)
+  } else {
+    if (source.title) parts.push(source.title)
+    if (source.confluence_id || source.external_id) parts.push(source.confluence_id || source.external_id)
+  }
+  const host = sourceHost(source.url)
+  if (host) parts.push(host)
+  return parts.join(' · ')
+}
+
 function renderMarkdown(value: string) {
   const lines = value.replace(/\r\n/g, '\n').split('\n')
   const html: string[] = []
@@ -336,40 +361,58 @@ function escapeAttr(value: string) {
     </aside>
 
     <section class="chat-main">
+      <header class="chat-topbar">
+        <div>
+          <span class="eyebrow">Knowledge assistant</span>
+          <h2>{{ sessionId ? 'Диалог по базе знаний' : 'Новый диалог' }}</h2>
+        </div>
+        <div class="chat-mode-pill">RAG</div>
+      </header>
       <div class="messages">
+        <div v-if="!messages.length" class="chat-empty">
+          <span class="chat-empty-mark">?</span>
+          <h3>Спросите что-нибудь по индексам</h3>
+          <p>Поиск выполняется по проиндексированным документам из выбранных источников.</p>
+        </div>
         <article v-for="(m, i) in messages" :key="i" :class="['message', m.role]">
-          <div v-if="m.status" class="message-status">{{ m.status }}</div>
-          <div class="message-body" v-html="renderMarkdown(displayContent(m))" />
-          <section v-if="m.sources?.length" class="sources-panel" aria-label="Источники">
-            <div class="sources-head">
-              <span>Источники</span>
-              <small>{{ uniqueSources(m.sources).length }}</small>
+          <div class="message-avatar">{{ m.role === 'user' ? 'Вы' : 'AI' }}</div>
+          <div class="message-card">
+            <div class="message-meta">
+              <span>{{ m.role === 'user' ? 'Вы' : 'Ассистент' }}</span>
+              <small v-if="m.role === 'assistant'">RAG</small>
             </div>
-            <div class="sources-list">
-              <a
-                v-for="(s, idx) in uniqueSources(m.sources)"
-                :key="s.url || `${s.title}-${idx}`"
-                :href="s.url"
-                target="_blank"
-                rel="noreferrer"
-                class="source-item"
-              >
-                <span class="source-index">{{ idx + 1 }}</span>
-                <span class="source-text">
-                  <strong>{{ s.title }}</strong>
-                  <small>
-                    <span :class="['source-badge', s.source_type]">{{ s.source_type }}</span>
-                    <template v-if="s.source_type === 'confluence'">{{ s.space_key }}</template>
-                    <template v-else>{{ s.repository }} · {{ s.ref }} · {{ s.file_path }}</template>
-                    <template v-if="sourceHost(s.url)"> · {{ sourceHost(s.url) }}</template>
-                  </small>
-                </span>
-              </a>
-            </div>
-          </section>
+            <div v-if="m.status" class="message-status">{{ m.status }}</div>
+            <div class="message-body" v-html="renderMarkdown(displayContent(m))" />
+            <details v-if="m.sources?.length" class="sources-panel">
+              <summary class="sources-head">
+                <span>Источники</span>
+                <small>{{ uniqueSources(m.sources).length }}</small>
+              </summary>
+              <div class="sources-list">
+                <a
+                  v-for="(s, idx) in uniqueSources(m.sources)"
+                  :key="s.url || `${s.title}-${idx}`"
+                  :href="s.url"
+                  target="_blank"
+                  rel="noreferrer"
+                  class="source-item"
+                >
+                  <span :class="['source-origin', s.source_type]">{{ sourceKind(s) }}</span>
+                  <span class="source-text">
+                    <strong>{{ sourceTitle(s) }}</strong>
+                    <small>
+                      {{ sourceDetail(s) }}
+                    </small>
+                  </span>
+                </a>
+              </div>
+            </details>
+          </div>
         </article>
       </div>
-      <ScopePicker v-model="scope" />
+      <div class="chat-controls">
+        <ScopePicker v-model="scope" />
+      </div>
       <form class="composer" @submit.prevent="send">
         <input v-model="message" placeholder="Спросите по выбранным проиндексированным источникам" />
         <div class="composer-actions">
