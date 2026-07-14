@@ -47,13 +47,8 @@ func (r *Repository) UpsertDocument(ctx context.Context, in domain.DocumentInput
 }
 
 func (r *Repository) DocumentHasChunks(ctx context.Context, id int64) (bool, error) {
-	exists := sq.Select("1").From("document_chunks").Where(sq.Eq{"document_id": id})
-	q, args, err := psql.Select().Column("EXISTS (?)", exists).ToSql()
-	if err != nil {
-		return false, err
-	}
 	var ok bool
-	err = r.pool.QueryRow(ctx, q, args...).Scan(&ok)
+	err := r.pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM document_chunks WHERE document_id=$1)", id).Scan(&ok)
 	return ok, err
 }
 
@@ -121,7 +116,13 @@ func (r *Repository) ListDocuments(ctx context.Context, sourceType string, scope
 		b = b.Where(sq.Eq{"scope_id": scopeID})
 	}
 	if qText != "" {
-		b = b.Where("title ILIKE ?", "%"+qText+"%")
+		like := "%" + qText + "%"
+		b = b.Where(sq.Or{
+			sq.Expr("title ILIKE ?", like),
+			sq.Expr("external_id ILIKE ?", like),
+			sq.Expr("url ILIKE ?", like),
+			sq.Expr("metadata::text ILIKE ?", like),
+		})
 	}
 	q, args, err := b.ToSql()
 	if err != nil {
